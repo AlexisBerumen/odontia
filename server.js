@@ -128,6 +128,29 @@ app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   res.json({ appointments: rows.map(row => ({ id: row.id, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, status: row.status === 'confirmed' ? 'Confirmada' : 'Pendiente', initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
 }));
 
+app.get('/api/patients', requireUser, asyncRoute(async (req, res) => {
+  const { rows } = await pool.query(`select p.id, p.full_name, p.phone, p.email, p.allergies, p.notes, p.created_at,
+      count(a.id)::integer as appointment_count, max(a.starts_at) as last_appointment
+    from patients p left join appointments a on a.patient_id = p.id and a.owner_id = p.owner_id
+    where p.owner_id = $1 group by p.id order by p.full_name asc`, [req.user.sub]);
+  res.json({ patients: rows.map(row => ({
+    id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, allergies: row.allergies,
+    notes: row.notes, appointmentCount: row.appointment_count, lastAppointment: row.last_appointment,
+  })) });
+}));
+
+app.post('/api/patients', requireUser, asyncRoute(async (req, res) => {
+  const fullName = String(req.body.fullName || '').trim();
+  const phone = String(req.body.phone || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const allergies = String(req.body.allergies || '').trim();
+  const notes = String(req.body.notes || '').trim();
+  if (fullName.length < 2 || (email && !emailPattern.test(email))) return res.status(400).json({ error: 'Agrega un nombre y, si aplica, un correo válido.' });
+  const id = crypto.randomUUID();
+  await pool.query('insert into patients (id, owner_id, full_name, phone, email, allergies, notes) values ($1, $2, $3, $4, $5, $6, $7)', [id, req.user.sub, fullName, phone || null, email || null, allergies || null, notes || null]);
+  res.status(201).json({ id });
+}));
+
 app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const patientName = String(req.body.patientName || '').trim();
   const appointmentType = String(req.body.appointmentType || '').trim();
