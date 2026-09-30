@@ -1,17 +1,25 @@
 import './style.css';
 import './patients.css';
+import './agenda.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
 let appointments = [];
 let patients = [];
 let editingPatient = null;
+let agendaAppointments = [];
+let editingAppointment = null;
+let creatingFromAgenda = false;
 let filter = 'Todas';
 const today = new Date();
+let agendaStart = mondayOf(today);
 const isoToday = today.toISOString().slice(0, 10);
 const dateText = new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(today);
 const esc = value => String(value).replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]);
 const initials = name => name.split(/\s+/).slice(0,2).map(part => part[0]).join('').toUpperCase();
+function dateValue(date) { const parts = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Mexico_City', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(date); const get = type => parts.find(part => part.type === type).value; return `${get('year')}-${get('month')}-${get('day')}`; }
+function mondayOf(date) { const copy = new Date(date); const shift = (copy.getDay() + 6) % 7; copy.setDate(copy.getDate() - shift); copy.setHours(12,0,0,0); return copy; }
+function addDays(date, days) { const copy = new Date(date); copy.setDate(copy.getDate() + days); return copy; }
 const icon = name => ({
   grid:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
   calendar:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/></svg>',
@@ -75,33 +83,54 @@ function patientsPage() {
   document.querySelector('#patient-search').oninput = event => { const query = event.target.value.toLowerCase(); document.querySelectorAll('.patient-row').forEach(row => row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
-  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section !== 'Pacientes') toast(`${button.dataset.section} estará disponible próximamente.`); });
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section !== 'Pacientes') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadPatients() { patients = (await api('/api/patients')).patients; patientsPage(); }
+function agendaModal() { return `<div class="modal-backdrop" id="agenda-modal"><form class="modal agenda-modal"><button type="button" class="modal-close" id="close-agenda-modal">×</button><p class="eyebrow">EDITAR CITA</p><h2>Detalles de la cita</h2><label>Paciente<input disabled name="patientName"/></label><div class="form-row"><label>Fecha<input required name="date" type="date"/></label><label>Hora<input required name="time" type="time"/></label></div><label>Tipo de cita<select name="appointmentType"><option>Limpieza dental</option><option>Valoración · primera cita</option><option>Revisión de tratamiento</option><option>Ajuste de ortodoncia</option></select></label><div class="form-row"><label>Duración<select name="durationMinutes"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Estado<select name="status"><option value="pending">Pendiente</option><option value="confirmed">Confirmada</option><option value="completed">Atendida</option><option value="cancelled">Cancelada</option></select></label></div><p class="form-error" id="agenda-error"></p><button class="save-appointment">Guardar cambios</button></form></div>`; }
+function agendaCard(appointment) { return `<button class="agenda-card status-${esc(appointment.statusKey)}" data-edit-appointment="${esc(appointment.id)}"><b>${esc(appointment.time)}</b><span>${esc(appointment.patient)}</span><small>${esc(appointment.type)}</small></button>`; }
+function agendaPage() {
+  const days = Array.from({ length:7 }, (_, index) => addDays(agendaStart, index));
+  const monthText = new Intl.DateTimeFormat('es-MX', { month:'long', year:'numeric' }).format(agendaStart);
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar',true)}${nav('Pacientes','users')}${nav('Tratamientos','tooth')}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Agenda semanal</div><div class="header-actions"><button class="new-appointment" id="agenda-new">${icon('plus')} Nueva cita</button></div></header><div class="content agenda-content"><div class="page-heading"><div><p class="eyebrow">CALENDARIO</p><h1>Agenda</h1><p>Organiza las consultas y actualiza su estado.</p></div><div class="week-controls"><button id="previous-week">‹</button><strong>${esc(monthText)}</strong><button id="next-week">›</button><button class="today-button" id="today-week">Hoy</button></div></div><section class="week-grid">${days.map(day => { const key = dateValue(day); const isToday = key === dateValue(today); const items = agendaAppointments.filter(appointment => dateValue(new Date(appointment.startsAt)) === key); return `<article class="week-day ${isToday ? 'today-column' : ''}"><header><span>${new Intl.DateTimeFormat('es-MX',{weekday:'short'}).format(day).replace('.','')}</span><strong>${day.getDate()}</strong></header><div class="week-items">${items.map(agendaCard).join('') || '<span class="empty-slot">—</span>'}</div></article>`; }).join('')}</section></div></main></div>${agendaModal()}${modal()}`;
+  document.querySelector('#previous-week').onclick = () => { agendaStart = addDays(agendaStart, -7); loadAgenda(); };
+  document.querySelector('#next-week').onclick = () => { agendaStart = addDays(agendaStart, 7); loadAgenda(); };
+  document.querySelector('#today-week').onclick = () => { agendaStart = mondayOf(today); loadAgenda(); };
+  document.querySelector('#agenda-new').onclick = () => { editingAppointment = null; creatingFromAgenda = true; document.querySelector('#modal').classList.add('visible'); };
+  document.querySelector('#close-modal').onclick = () => document.querySelector('#modal').classList.remove('visible');
+  document.querySelector('#modal').onclick = event => { if (event.target.id === 'modal') event.currentTarget.classList.remove('visible'); };
+  document.querySelector('#close-agenda-modal').onclick = () => document.querySelector('#agenda-modal').classList.remove('visible');
+  document.querySelector('#agenda-modal').onclick = event => { if (event.target.id === 'agenda-modal') event.currentTarget.classList.remove('visible'); };
+  document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
+  document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Agenda') toast(`${button.dataset.section} estará disponible próximamente.`); });
+}
+async function loadAgenda() { const from = dateValue(agendaStart); const to = dateValue(addDays(agendaStart, 6)); agendaAppointments = (await api(`/api/appointments?from=${from}&to=${to}`)).appointments; agendaPage(); }
 function bindDashboard() {
   document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => { filter = button.dataset.filter; dashboard(); });
-  const open = () => document.querySelector('#modal').classList.add('visible'); document.querySelector('#open-modal').onclick = open; document.querySelector('#open-modal-2').onclick = open; document.querySelector('#close-modal').onclick = () => document.querySelector('#modal').classList.remove('visible');
+  const open = () => { creatingFromAgenda = false; document.querySelector('#modal').classList.add('visible'); }; document.querySelector('#open-modal').onclick = open; document.querySelector('#open-modal-2').onclick = open; document.querySelector('#close-modal').onclick = () => document.querySelector('#modal').classList.remove('visible');
   document.querySelector('#modal').onclick = event => { if (event.target.id === 'modal') event.currentTarget.classList.remove('visible'); };
   document.querySelector('#search').oninput = event => { const query = event.target.value.toLowerCase(); document.querySelectorAll('.appointment-card').forEach(element => element.style.display = element.textContent.toLowerCase().includes(query) ? '' : 'none'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
-  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Inicio') toast(`${button.dataset.section} estará disponible próximamente.`); });
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section !== 'Inicio') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
 document.addEventListener('submit', async event => {
   if (!event.target.matches('.modal:not(.patient-modal)')) return;
   event.preventDefault();
   const form = event.target;
-  const error = document.querySelector('#appointment-error');
+  const isEditing = event.target.matches('.agenda-modal') && editingAppointment;
+  const error = document.querySelector(isEditing ? '#agenda-error' : '#appointment-error');
   const button = form.querySelector('.save-appointment');
   error.textContent = '';
   button.disabled = true;
   button.textContent = 'Guardando…';
   try {
     const values = Object.fromEntries(new FormData(form));
-    await api('/api/appointments', { method:'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00`, durationMinutes:30 }) });
-    toast('Cita guardada en tu agenda');
-    await loadDashboard();
+    await api(isEditing ? `/api/appointments/${editingAppointment.id}` : '/api/appointments', { method:isEditing ? 'PATCH' : 'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00`, durationMinutes:Number(values.durationMinutes || 30), ...(isEditing ? { status:values.status } : {}) }) });
+    toast(isEditing ? 'Cita actualizada correctamente' : 'Cita guardada en tu agenda');
+    editingAppointment = null;
+    if (isEditing || creatingFromAgenda) { creatingFromAgenda = false; await loadAgenda(); } else await loadDashboard();
   } catch (err) {
     error.textContent = err.message;
     button.disabled = false;
@@ -144,6 +173,22 @@ document.addEventListener('click', event => {
   modal.querySelector('.eyebrow').textContent = 'EDITAR PACIENTE';
   modal.querySelector('h2').textContent = 'Actualizar expediente';
   form.querySelector('.save-appointment').textContent = 'Guardar cambios';
+  modal.classList.add('visible');
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-edit-appointment]');
+  if (!button) return;
+  editingAppointment = agendaAppointments.find(appointment => appointment.id === button.dataset.editAppointment);
+  if (!editingAppointment) return;
+  const modal = document.querySelector('#agenda-modal');
+  const form = modal.querySelector('.agenda-modal');
+  const startsAt = new Date(editingAppointment.startsAt);
+  form.patientName.value = editingAppointment.patient;
+  form.date.value = dateValue(startsAt);
+  form.time.value = new Intl.DateTimeFormat('en-GB', { timeZone:'America/Mexico_City', hour:'2-digit', minute:'2-digit', hour12:false }).format(startsAt);
+  form.appointmentType.value = editingAppointment.type;
+  form.durationMinutes.value = String(editingAppointment.durationMinutes);
+  form.status.value = editingAppointment.statusKey;
   modal.classList.add('visible');
 });
 function toast(message) { const element = document.createElement('div'); element.className = 'toast'; element.textContent = message; document.body.append(element); setTimeout(() => element.remove(), 2800); }

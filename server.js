@@ -121,11 +121,18 @@ app.get('/api/auth/me', requireUser, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
+  const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '');
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
+  const from = validDate(req.query.from) ? req.query.from : today;
+  const to = validDate(req.query.to) ? req.query.to : from;
+  if (to < from) return res.status(400).json({ error: 'El rango de fechas no es válido.' });
   const { rows } = await pool.query(`select a.id, a.starts_at, a.duration_minutes, a.appointment_type, a.status, p.full_name as patient_name
     from appointments a join patients p on p.id = a.patient_id
-    where a.owner_id = $1 and a.starts_at >= date_trunc('day', now() at time zone 'America/Mexico_City') at time zone 'America/Mexico_City'
-    order by a.starts_at asc limit 100`, [req.user.sub]);
-  res.json({ appointments: rows.map(row => ({ id: row.id, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, status: row.status === 'confirmed' ? 'Confirmada' : 'Pendiente', initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
+    where a.owner_id = $1 and a.starts_at >= ($2::date at time zone 'America/Mexico_City')
+      and a.starts_at < (($3::date + interval '1 day') at time zone 'America/Mexico_City')
+    order by a.starts_at asc limit 250`, [req.user.sub, from, to]);
+  const statuses = { pending: 'Pendiente', confirmed: 'Confirmada', completed: 'Atendida', cancelled: 'Cancelada' };
+  res.json({ appointments: rows.map(row => ({ id: row.id, startsAt: row.starts_at, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, durationMinutes: row.duration_minutes, status: statuses[row.status], statusKey: row.status, initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
 }));
 
 app.get('/api/patients', requireUser, asyncRoute(async (req, res) => {
@@ -170,6 +177,10 @@ app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const startsAt = new Date(req.body.startsAt);
   const duration = Number(req.body.durationMinutes || 30);
   if (patientName.length < 2 || appointmentType.length < 2 || Number.isNaN(startsAt.valueOf()) || duration < 10 || duration > 240) return res.status(400).json({ error: 'Revisa los datos de la cita.' });
+  const conflict = await pool.query(`select 1 from appointments where owner_id = $1 and status <> 'cancelled'
+    and starts_at < $2::timestamptz + ($3::int * interval '1 minute')
+    and starts_at + (duration_minutes * interval '1 minute') > $2::timestamptz limit 1`, [req.user.sub, startsAt.toISOString(), duration]);
+  if (conflict.rowCount) return res.status(409).json({ error: 'Ya existe una cita que ocupa ese horario.' });
   const client = await pool.connect();
   try {
     await client.query('begin');
@@ -180,6 +191,24 @@ app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
     await client.query('commit');
   } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   res.status(201).json({ ok: true });
+}));
+
+app.patch('/api/appointments/:id', requireUser, asyncRoute(async (req, res) => {
+  const appointmentType = String(req.body.appointmentType || '').trim();
+  const startsAt = new Date(req.body.startsAt);
+  const duration = Number(req.body.durationMinutes || 30);
+  const status = String(req.body.status || 'pending');
+  if (appointmentType.length < 2 || Number.isNaN(startsAt.valueOf()) || duration < 10 || duration > 240 || !validStatuses.has(status)) return res.status(400).json({ error: 'Revisa los datos de la cita.' });
+  if (status !== 'cancelled') {
+    const conflict = await pool.query(`select 1 from appointments where owner_id = $1 and id <> $2 and status <> 'cancelled'
+      and starts_at < $3::timestamptz + ($4::int * interval '1 minute')
+      and starts_at + (duration_minutes * interval '1 minute') > $3::timestamptz limit 1`, [req.user.sub, req.params.id, startsAt.toISOString(), duration]);
+    if (conflict.rowCount) return res.status(409).json({ error: 'Ya existe una cita que ocupa ese horario.' });
+  }
+  const { rowCount } = await pool.query(`update appointments set starts_at = $1, duration_minutes = $2, appointment_type = $3, status = $4
+    where id = $5 and owner_id = $6`, [startsAt.toISOString(), duration, appointmentType, status, req.params.id, req.user.sub]);
+  if (!rowCount) return res.status(404).json({ error: 'Cita no encontrada.' });
+  res.json({ ok: true });
 }));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada.' }));
