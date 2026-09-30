@@ -66,9 +66,15 @@ function asyncRoute(handler) { return (req, res, next) => Promise.resolve(handle
 
 function requireUser(req, res, next) {
   const token = req.get('authorization')?.replace(/^Bearer\s+/i, '');
-  if (!token) return res.status(401).json({ error: 'Inicia sesión para continuar.' });
+  if (!token) {
+    console.warn('Sesión rechazada: no se recibió credencial.');
+    return res.status(401).json({ error: 'Inicia sesión para continuar.' });
+  }
   try { req.user = jwt.verify(token, jwtSecret, { issuer: 'odontia' }); return next(); }
-  catch { return res.status(401).json({ error: 'Tu sesión expiró. Inicia sesión de nuevo.' }); }
+  catch (error) {
+    console.warn('Sesión rechazada:', error.name, error.message);
+    return res.status(401).json({ error: 'Tu sesión expiró. Inicia sesión de nuevo.' });
+  }
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => { await pool.query('select 1'); res.json({ ok: true }); }));
@@ -102,7 +108,10 @@ app.post('/api/auth/login', authAttempts, asyncRoute(async (req, res) => {
 
 app.get('/api/auth/me', requireUser, asyncRoute(async (req, res) => {
   const { rows } = await pool.query('select id, full_name, clinic_name, email from users where id = $1', [req.user.sub]);
-  if (!rows[0]) return res.status(401).json({ error: 'Cuenta no encontrada.' });
+  if (!rows[0]) {
+    console.warn('Sesión rechazada: la cuenta ya no existe.', { userId: req.user.sub });
+    return res.status(401).json({ error: 'Cuenta no encontrada.' });
+  }
   res.json({ user: publicUser(rows[0]) });
 }));
 
