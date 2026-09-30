@@ -3,6 +3,7 @@ import './patients.css';
 import './agenda.css';
 import './treatments.css';
 import './odontogram.css';
+import './tooth-icons.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -107,7 +108,7 @@ function treatmentsPage() {
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Tratamientos') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadTreatments() { const [treatmentData, patientData] = await Promise.all([api('/api/treatments'), api('/api/patients')]); treatments = treatmentData.treatments; patients = patientData.patients; treatmentsPage(); }
-function toothButton(tooth) { const record = odontogramRecords.find(item => item.toothNumber === tooth); const status = record?.status || 'healthy'; return `<button class="tooth ${status} ${selectedTooth === tooth ? 'selected-tooth' : ''}" data-tooth="${tooth}"><span>♧</span><b>${tooth}</b></button>`; }
+function toothButton(tooth) { const record = odontogramRecords.find(item => item.toothNumber === tooth); const status = record?.status || 'healthy'; return `<button class="tooth ${status} ${selectedTooth === tooth ? 'selected-tooth' : ''}" data-tooth="${tooth}"><span class="tooth-symbol">${icon('tooth')}</span><b>${tooth}</b></button>`; }
 function odontogramPage() {
   const selectedRecord = odontogramRecords.find(item => item.toothNumber === selectedTooth) || { status:'healthy', notes:'' };
   const patient = patients.find(item => item.id === odontogramPatientId);
