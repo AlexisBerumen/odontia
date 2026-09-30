@@ -19,3 +19,11 @@ La demostración guarda las nuevas citas en el navegador para que pueda probarse
 4. Despliega el sitio en Vercel o Netlify y configura allí las mismas variables.
 
 Nunca uses la clave `service_role` en el navegador. Para recordatorios de WhatsApp, llama a su API desde una función de servidor (por ejemplo, Supabase Edge Function), no desde el cliente.
+
+## Desplegar en Railway
+
+1. En Railway selecciona **New Project → Deploy from GitHub repo** y elige este repositorio.
+2. Railway detectará `railway.json`, instalará dependencias, ejecutará `npm run build` y servirá la app usando su puerto seguro.
+3. En **Settings → Networking**, pulsa **Generate Domain** para obtener el enlace público.
+
+Cuando se conecte Supabase, crea en Railway las variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` y vuelve a desplegar. No agregues nunca la clave `service_role`.
