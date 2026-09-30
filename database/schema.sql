@@ -9,6 +9,34 @@ create table if not exists users (
   created_at timestamptz not null default now()
 );
 
+-- Cada clínica usa como id el id de la cuenta titular; así se conservan
+-- compatibles los datos existentes mientras el sistema se vuelve multi-clínica.
+create table if not exists clinics (
+  id uuid primary key references users(id) on delete cascade,
+  name text not null,
+  owner_user_id uuid not null unique references users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists clinic_members (
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  user_id uuid not null unique references users(id) on delete cascade,
+  role text not null check (role in ('owner', 'dentist', 'assistant', 'reception')),
+  created_at timestamptz not null default now(),
+  primary key (clinic_id, user_id)
+);
+
+create table if not exists clinic_invites (
+  id uuid primary key,
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  email text not null,
+  role text not null check (role in ('dentist', 'assistant', 'reception')),
+  code text not null unique,
+  expires_at timestamptz not null,
+  accepted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists patients (
   id uuid primary key,
   owner_id uuid not null references users(id) on delete cascade,

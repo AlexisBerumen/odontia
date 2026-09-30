@@ -1,0 +1,19 @@
+.team-content { max-width: 1120px; }
+.team-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 22px; margin-bottom: 22px; }
+.team-panel, .invite-panel, .invitations-panel { padding: 25px; }
+.team-panel h2, .invite-panel h2, .invitations-panel h2 { margin-top: 0; color: #123d4a; }
+.invite-panel > p:not(.eyebrow) { color: #66808a; line-height: 1.5; }
+.team-list, .invite-list { display: grid; gap: 4px; }
+.team-row, .invite-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid #e6eeee; }
+.team-row:last-child, .invite-row:last-child { border-bottom: 0; }
+.team-row div, .invite-row div { display: grid; gap: 3px; min-width: 0; }
+.team-row strong, .invite-row strong { color: #204d59; }
+.team-row span, .invite-row span { color: #6d8289; font-size: .88rem; overflow-wrap: anywhere; }
+.team-row b { color: #087a7d; background: #e8f5f4; padding: 6px 9px; border-radius: 999px; font-size: .78rem; white-space: nowrap; }
+.invite-row code { color: #123d4a; background: #f0f5f5; padding: 8px 10px; border-radius: 7px; letter-spacing: .08em; font-weight: 700; }
+.invite-panel form { display: grid; gap: 13px; margin-top: 18px; }
+.invite-panel label { display: grid; gap: 7px; color: #385963; font-weight: 700; font-size: .9rem; }
+.invite-panel input, .invite-panel select { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #d6e3e5; border-radius: 9px; font: inherit; }
+.access-message { max-width: 620px; margin: 90px auto; padding: 28px; background: #fff; border: 1px solid #e3eeee; border-radius: 14px; color: #315661; }
+@media (max-width: 800px) { .team-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .team-panel, .invite-panel, .invitations-panel { padding: 18px; } .team-row, .invite-row { align-items: flex-start; flex-direction: column; } }

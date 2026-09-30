@@ -9,6 +9,7 @@ import './context-nav.css';
 import './payments.css';
 import './payment-history.css';
 import './audit.css';
+import './team.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -28,6 +29,7 @@ let agendaAppointments = [];
 let editingAppointment = null;
 let creatingFromAgenda = false;
 let auditEvents = [];
+let teamData = null;
 let filter = 'Todas';
 const today = new Date();
 let agendaStart = mondayOf(today);
@@ -63,8 +65,10 @@ function authPage() {
   document.querySelector('#app').innerHTML = `<main class="auth-page"><section class="auth-card"><a class="brand auth-brand"><span class="brand-mark">O</span><span>odontia</span></a><div id="auth-copy"><p class="eyebrow">GESTIÓN DENTAL EN LÍNEA</p><h1>Tu consultorio,<br/>siempre contigo.</h1><p>Crea tu cuenta para guardar y consultar tu agenda desde cualquier dispositivo.</p></div><form id="auth-form"><label id="name-label">Nombre completo<input required name="fullName" autocomplete="name" placeholder="Dra. Andrea López"/></label><label id="clinic-label">Nombre del consultorio <em>(opcional)</em><input name="clinicName" placeholder="Clínica Sonrisa"/></label><label>Correo electrónico<input required type="email" name="email" autocomplete="email" placeholder="tu@consultorio.com"/></label><label>Contraseña<input required type="password" name="password" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres"/></label><p class="form-error" id="form-error"></p><button class="save-appointment" id="auth-submit">Crear cuenta</button></form><p class="auth-switch" id="switch-line">¿Ya tienes una cuenta? <button id="mode-toggle">Inicia sesión</button></p></section><aside class="auth-aside"><div><span class="auth-tooth">${icon('tooth')}</span><h2>Una agenda clara.<br/>Un mejor cuidado.</h2><p>Odontia te ayuda a dedicar más tiempo a tus pacientes.</p></div></aside></main>`;
   let register = true;
   const form = document.querySelector('#auth-form');
+  document.querySelector('#clinic-label').insertAdjacentHTML('afterend', '<label id="invite-label">Código de invitación <em>(solo personal)</em><input name="inviteCode" autocomplete="off" placeholder="Ej. A1B2C3D4"/></label>');
   const setMode = () => {
     document.querySelector('#name-label').hidden = !register; document.querySelector('#clinic-label').hidden = !register;
+    document.querySelector('#invite-label').hidden = !register;
     document.querySelector('#auth-submit').textContent = register ? 'Crear cuenta' : 'Iniciar sesión';
     document.querySelector('#switch-line').innerHTML = register ? '¿Ya tienes una cuenta? <button id="mode-toggle">Inicia sesión</button>' : '¿Aún no tienes cuenta? <button id="mode-toggle">Crear cuenta</button>';
     form.password.autocomplete = register ? 'new-password' : 'current-password';
@@ -73,7 +77,7 @@ function authPage() {
   document.querySelector('#mode-toggle').onclick = () => { register = false; setMode(); };
   form.onsubmit = async event => {
     event.preventDefault(); const submit = document.querySelector('#auth-submit'); const error = document.querySelector('#form-error'); error.textContent = ''; submit.disabled = true;
-    try { const payload = Object.fromEntries(new FormData(form)); const data = await api(register ? '/api/auth/register' : '/api/auth/login', { method:'POST', body:JSON.stringify(payload) }); token = data.token; user = data.user; localStorage.setItem('odontia-token', token); await loadDashboard(); }
+    try { const payload = Object.fromEntries(new FormData(form)); const data = await api(register ? '/api/auth/register' : '/api/auth/login', { method:'POST', body:JSON.stringify(payload) }); token = data.token; localStorage.setItem('odontia-token', token); user = (await api('/api/auth/me')).user; await loadDashboard(); }
     catch (err) { error.textContent = err.message; submit.disabled = false; }
   };
 }
@@ -87,7 +91,7 @@ const auditLabels = {
   'clinical_note.created':'Evolución clínica registrada', 'treatment.created':'Tratamiento creado', 'treatment.updated':'Tratamiento actualizado',
   'treatment.status_updated':'Estado de tratamiento actualizado', 'payment.created':'Abono registrado', 'payment.updated':'Abono corregido',
   'odontogram.created':'Pieza registrada en odontograma', 'odontogram.updated':'Pieza actualizada en odontograma',
-  'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada',
+  'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada', 'team.invite_created':'Invitación de equipo creada',
 };
 const statusLabels = {
   active:'Activo', completed:'Finalizado', pending:'Pendiente', confirmed:'Confirmada', cancelled:'Cancelada',
@@ -111,12 +115,33 @@ function auditPage() {
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); });
 }
 async function loadAudit() { auditEvents = (await api('/api/audit-events')).events; auditPage(); }
+const roleNames = { owner:'Titular', dentist:'Odontólogo/a', assistant:'Asistente clínico/a', reception:'Recepción' };
+function settingsPage() {
+  if (user.role !== 'owner') {
+    document.querySelector('#app').innerHTML = '<main class="access-message"><h1>Configuración</h1><p>Solo la persona titular de la clínica puede administrar el equipo.</p></main>';
+    return;
+  }
+  const members = teamData.members.map(member => `<article class="team-row"><div><strong>${esc(member.fullName)}</strong><span>${esc(member.email)}</span></div><b>${esc(roleNames[member.role])}</b></article>`).join('');
+  const invites = teamData.invites.map(invite => `<article class="invite-row"><div><strong>${esc(invite.email)}</strong><span>${esc(roleNames[invite.role])} · código vigente 7 días</span></div><code>${esc(invite.code)}</code></article>`).join('');
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth')}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings',true)}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(teamData.clinic.name)}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Configuración</div></header><div class="content team-content"><div class="page-heading"><div><p class="eyebrow">CLÍNICA Y SEGURIDAD</p><h1>Equipo de ${esc(teamData.clinic.name)}</h1><p>Cada persona usa su propia cuenta. Sus acciones quedan registradas en la Bitácora.</p></div></div><div class="team-grid"><section class="panel team-panel"><h2>Miembros</h2><div class="team-list">${members}</div></section><section class="panel invite-panel"><p class="eyebrow">NUEVA INVITACIÓN</p><h2>Invitar integrante</h2><p>Comparte el código con la persona invitada; deberá registrarse con este mismo correo.</p><form id="team-invite-form"><label>Correo<input required type="email" name="email" placeholder="asistente@correo.com"/></label><label>Rol<select name="role"><option value="dentist">Odontólogo/a</option><option value="assistant">Asistente clínico/a</option><option value="reception">Recepción</option></select></label><p class="form-error" id="team-error"></p><button class="save-appointment">Crear invitación</button></form></section></div><section class="panel invitations-panel"><h2>Invitaciones pendientes</h2><div class="invite-list">${invites || '<p class="empty">No hay invitaciones pendientes.</p>'}</div></section></div></main></div>`;
+  document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
+  document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('#team-invite-form').onsubmit = async event => {
+    event.preventDefault();
+    const error = document.querySelector('#team-error'); const button = event.currentTarget.querySelector('button');
+    error.textContent = ''; button.disabled = true;
+    try { const result = await api('/api/team/invites', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); toast(`Invitación creada. Código: ${result.code}`); await loadSettings(); }
+    catch (err) { error.textContent = err.message; button.disabled = false; }
+  };
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); else if (button.dataset.section === 'Reportes') loadAudit(); });
+}
+async function loadSettings() { teamData = await api('/api/team'); settingsPage(); }
 document.addEventListener('click', event => {
   const section = event.target.closest('[data-section]');
-  if (section?.dataset.section !== 'Reportes') return;
+  if (!['Reportes', 'Configuración'].includes(section?.dataset.section)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  loadAudit().catch(error => toast(error.message));
+  (section.dataset.section === 'Reportes' ? loadAudit() : loadSettings()).catch(error => toast(error.message));
 }, true);
 function card(a, index) { return `<article class="appointment-card"><time>${esc(a.time)}</time><div class="appointment-line"></div><div class="avatar ${['aqua','purple','orange','blue'][index % 4]}">${esc(a.initials)}</div><div class="appointment-info"><strong>${esc(a.patient)}</strong><span>${esc(a.type)} <i>•</i> ${esc(a.duration)}</span></div><span class="status ${a.status === 'Confirmada' ? 'confirmed' : 'pending'}">${esc(a.status)}</span></article>`; }
 function schedule() {

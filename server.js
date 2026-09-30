@@ -28,6 +28,29 @@ async function migrate() {
       id uuid primary key, full_name text not null, clinic_name text, email text not null unique,
       password_hash text not null, created_at timestamptz not null default now()
     );
+    create table if not exists clinics (
+      id uuid primary key references users(id) on delete cascade,
+      name text not null, owner_user_id uuid not null unique references users(id) on delete cascade,
+      created_at timestamptz not null default now()
+    );
+    create table if not exists clinic_members (
+      clinic_id uuid not null references clinics(id) on delete cascade,
+      user_id uuid not null unique references users(id) on delete cascade,
+      role text not null check (role in ('owner', 'dentist', 'assistant', 'reception')),
+      created_at timestamptz not null default now(),
+      primary key (clinic_id, user_id)
+    );
+    create table if not exists clinic_invites (
+      id uuid primary key, clinic_id uuid not null references clinics(id) on delete cascade,
+      email text not null, role text not null check (role in ('dentist', 'assistant', 'reception')),
+      code text not null unique, expires_at timestamptz not null, accepted_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists clinic_invites_clinic_idx on clinic_invites (clinic_id, created_at desc);
+    insert into clinics (id, name, owner_user_id)
+      select id, coalesce(nullif(clinic_name, ''), full_name), id from users on conflict (id) do nothing;
+    insert into clinic_members (clinic_id, user_id, role)
+      select id, id, 'owner' from users on conflict (user_id) do nothing;
     create table if not exists patients (
       id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
       full_name text not null, phone text, email text, birth_date date, allergies text, notes text,
@@ -106,28 +129,39 @@ const authAttempts = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHe
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const validStatuses = new Set(['pending', 'confirmed', 'completed', 'cancelled']);
 
-function publicUser(row) { return { id: row.id, fullName: row.full_name, clinicName: row.clinic_name, email: row.email }; }
+function publicUser(row) { return { id: row.id, fullName: row.full_name, clinicName: row.clinic_name || row.clinic_name_joined, email: row.email, role: row.role }; }
 function issueToken(user) { return jwt.sign({ sub: user.id, email: user.email }, jwtSecret, { expiresIn: '7d', issuer: 'odontia' }); }
 function asyncRoute(handler) { return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next); }
 async function recordAudit(req, action, entityType, entityId, entityName, details = {}, db = pool) {
   await db.query(`insert into audit_events (id, owner_id, actor_id, action, entity_type, entity_id, entity_name, details)
-    values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, [crypto.randomUUID(), req.user.sub, req.user.sub, action, entityType, entityId || null, entityName || null, JSON.stringify(details)]);
+    values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, [crypto.randomUUID(), req.user.sub, req.actorId, action, entityType, entityId || null, entityName || null, JSON.stringify(details)]);
 }
 function changedFields(before, after, labels) {
   return Object.entries(labels).filter(([key]) => String(before[key] ?? '') !== String(after[key] ?? '')).map(([, label]) => label);
 }
 
-function requireUser(req, res, next) {
+async function requireUser(req, res, next) {
   const token = req.get('authorization')?.replace(/^Bearer\s+/i, '');
   if (!token) {
     console.warn('Sesión rechazada: no se recibió credencial.');
     return res.status(401).json({ error: 'Inicia sesión para continuar.' });
   }
-  try { req.user = jwt.verify(token, jwtSecret, { issuer: 'odontia' }); return next(); }
+  try {
+    req.user = jwt.verify(token, jwtSecret, { issuer: 'odontia' });
+    req.actorId = req.user.sub;
+    const membership = await pool.query('select clinic_id, role from clinic_members where user_id = $1', [req.actorId]);
+    if (!membership.rowCount) return res.status(403).json({ error: 'Tu cuenta no pertenece a un consultorio activo.' });
+    req.role = membership.rows[0].role;
+    req.user.sub = membership.rows[0].clinic_id;
+    return next();
+  }
   catch (error) {
     console.warn('Sesión rechazada:', error.name, error.message);
     return res.status(401).json({ error: 'Tu sesión expiró. Inicia sesión de nuevo.' });
   }
+}
+function requireRoles(...roles) {
+  return (req, res, next) => roles.includes(req.role) ? next() : res.status(403).json({ error: 'No tienes permiso para realizar esta acción.' });
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => { await pool.query('select 1'); res.json({ ok: true }); }));
@@ -137,16 +171,35 @@ app.post('/api/auth/register', authAttempts, asyncRoute(async (req, res) => {
   const clinicName = String(req.body.clinicName || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
+  const inviteCode = String(req.body.inviteCode || '').trim().toUpperCase();
   if (fullName.length < 2 || !emailPattern.test(email) || password.length < 8) return res.status(400).json({ error: 'Completa tu nombre, un correo válido y una contraseña de al menos 8 caracteres.' });
-  const user = { id: crypto.randomUUID(), fullName, clinicName: clinicName || null, email };
+  const user = { id: crypto.randomUUID(), fullName, clinicName: clinicName || fullName, email };
+  const client = await pool.connect();
   try {
+    await client.query('begin');
+    let invite = null;
+    if (inviteCode) {
+      const result = await client.query('select * from clinic_invites where code = $1 and accepted_at is null and expires_at > now() and email = $2', [inviteCode, email]);
+      invite = result.rows[0];
+      if (!invite) { const error = new Error('El código de invitación no es válido, expiró o no corresponde a este correo.'); error.status = 400; throw error; }
+    }
     const passwordHash = await bcrypt.hash(password, 12);
-    await pool.query('insert into users (id, full_name, clinic_name, email, password_hash) values ($1, $2, $3, $4, $5)', [user.id, user.fullName, user.clinicName, user.email, passwordHash]);
+    await client.query('insert into users (id, full_name, clinic_name, email, password_hash) values ($1, $2, $3, $4, $5)', [user.id, user.fullName, user.clinicName, user.email, passwordHash]);
+    if (invite) {
+      await client.query('insert into clinic_members (clinic_id, user_id, role) values ($1, $2, $3)', [invite.clinic_id, user.id, invite.role]);
+      await client.query('update clinic_invites set accepted_at = now() where id = $1', [invite.id]);
+    } else {
+      await client.query('insert into clinics (id, name, owner_user_id) values ($1, $2, $3)', [user.id, user.clinicName, user.id]);
+      await client.query("insert into clinic_members (clinic_id, user_id, role) values ($1, $2, 'owner')", [user.id, user.id]);
+    }
+    await client.query('commit');
   } catch (error) {
+    await client.query('rollback');
+    if (error.status) return res.status(error.status).json({ error: error.message });
     if (error.code === '23505') return res.status(409).json({ error: 'Ya existe una cuenta con ese correo.' });
     throw error;
-  }
-  res.status(201).json({ token: issueToken(user), user });
+  } finally { client.release(); }
+  res.status(201).json({ token: issueToken(user), user: { ...user, role: inviteCode ? undefined : 'owner' } });
 }));
 
 app.post('/api/auth/login', authAttempts, asyncRoute(async (req, res) => {
@@ -160,12 +213,35 @@ app.post('/api/auth/login', authAttempts, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/auth/me', requireUser, asyncRoute(async (req, res) => {
-  const { rows } = await pool.query('select id, full_name, clinic_name, email from users where id = $1', [req.user.sub]);
+  const { rows } = await pool.query(`select u.id, u.full_name, u.email, c.name as clinic_name_joined, cm.role
+    from users u join clinic_members cm on cm.user_id = u.id join clinics c on c.id = cm.clinic_id where u.id = $1`, [req.actorId]);
   if (!rows[0]) {
-    console.warn('Sesión rechazada: la cuenta ya no existe.', { userId: req.user.sub });
+    console.warn('Sesión rechazada: la cuenta ya no existe.', { userId: req.actorId });
     return res.status(401).json({ error: 'Cuenta no encontrada.' });
   }
   res.json({ user: publicUser(rows[0]) });
+}));
+
+app.get('/api/team', requireUser, requireRoles('owner'), asyncRoute(async (req, res) => {
+  const [clinic, members, invites] = await Promise.all([
+    pool.query('select name from clinics where id = $1', [req.user.sub]),
+    pool.query(`select u.id, u.full_name, u.email, cm.role, cm.created_at from clinic_members cm
+      join users u on u.id = cm.user_id where cm.clinic_id = $1 order by case when cm.role = 'owner' then 0 else 1 end, u.full_name`, [req.user.sub]),
+    pool.query('select id, email, role, code, expires_at from clinic_invites where clinic_id = $1 and accepted_at is null and expires_at > now() order by created_at desc', [req.user.sub]),
+  ]);
+  res.json({ clinic: clinic.rows[0], members: members.rows.map(row => ({ id: row.id, fullName: row.full_name, email: row.email, role: row.role })), invites: invites.rows.map(row => ({ id: row.id, email: row.email, role: row.role, code: row.code, expiresAt: row.expires_at })) });
+}));
+
+app.post('/api/team/invites', requireUser, requireRoles('owner'), asyncRoute(async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const role = String(req.body.role || '');
+  if (!emailPattern.test(email) || !['dentist', 'assistant', 'reception'].includes(role)) return res.status(400).json({ error: 'Indica un correo válido y un rol para la invitación.' });
+  const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+  const id = crypto.randomUUID();
+  await pool.query(`insert into clinic_invites (id, clinic_id, email, role, code, expires_at)
+    values ($1, $2, $3, $4, $5, now() + interval '7 days')`, [id, req.user.sub, email, role, code]);
+  await recordAudit(req, 'team.invite_created', 'team_invite', id, email, { role });
+  res.status(201).json({ id, code });
 }));
 
 app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
@@ -183,7 +259,7 @@ app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   res.json({ appointments: rows.map(row => ({ id: row.id, startsAt: row.starts_at, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, durationMinutes: row.duration_minutes, status: statuses[row.status], statusKey: row.status, initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
 }));
 
-app.get('/api/patients', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/patients', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`select p.id, p.full_name, p.phone, p.email, p.birth_date, p.allergies, p.notes, p.medical_history, p.medications, p.emergency_contact, p.reason_for_visit, p.created_at,
       count(a.id)::integer as appointment_count, max(a.starts_at) as last_appointment
     from patients p left join appointments a on a.patient_id = p.id and a.owner_id = p.owner_id
@@ -194,7 +270,7 @@ app.get('/api/patients', requireUser, asyncRoute(async (req, res) => {
   })) });
 }));
 
-app.post('/api/patients', requireUser, asyncRoute(async (req, res) => {
+app.post('/api/patients', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const fullName = String(req.body.fullName || '').trim();
   const phone = String(req.body.phone || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -213,7 +289,7 @@ app.post('/api/patients', requireUser, asyncRoute(async (req, res) => {
   res.status(201).json({ id });
 }));
 
-app.patch('/api/patients/:id', requireUser, asyncRoute(async (req, res) => {
+app.patch('/api/patients/:id', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const fullName = String(req.body.fullName || '').trim();
   const phone = String(req.body.phone || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -238,7 +314,7 @@ app.patch('/api/patients/:id', requireUser, asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/patients/:id/profile', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/patients/:id/profile', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const patient = await pool.query(`select id, full_name, phone, email, birth_date, allergies, notes, medical_history, medications, emergency_contact, reason_for_visit, created_at
     from patients where id = $1 and owner_id = $2`, [req.params.id, req.user.sub]);
   if (!patient.rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
@@ -250,7 +326,7 @@ app.get('/api/patients/:id/profile', requireUser, asyncRoute(async (req, res) =>
   res.json({ patient: patient.rows[0], appointments: appointments.rows, treatments: treatments.rows, clinicalNotes: notes.rows });
 }));
 
-app.post('/api/patients/:id/clinical-notes', requireUser, asyncRoute(async (req, res) => {
+app.post('/api/patients/:id/clinical-notes', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const procedureDone = String(req.body.procedureDone || '').trim();
   const diagnosis = String(req.body.diagnosis || '').trim();
   const indications = String(req.body.indications || '').trim();
@@ -266,7 +342,7 @@ app.post('/api/patients/:id/clinical-notes', requireUser, asyncRoute(async (req,
   res.status(201).json({ ok: true });
 }));
 
-app.get('/api/treatments', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/treatments', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`select t.id, t.patient_id, t.treatment_name, t.tooth, t.status, t.estimated_cost, t.notes, t.created_at,
     p.full_name as patient_name, coalesce(sum(tp.amount), 0) as paid_amount, count(tp.id)::integer as payment_count from treatments t join patients p on p.id = t.patient_id
     left join treatment_payments tp on tp.treatment_id = t.id and tp.owner_id = t.owner_id
@@ -275,7 +351,7 @@ app.get('/api/treatments', requireUser, asyncRoute(async (req, res) => {
     patientId: row.patient_id, estimatedCost: row.estimated_cost, paidAmount: row.paid_amount, paymentCount: row.payment_count, notes: row.notes, createdAt: row.created_at, patientName: row.patient_name })) });
 }));
 
-app.post('/api/treatments', requireUser, asyncRoute(async (req, res) => {
+app.post('/api/treatments', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const patientId = String(req.body.patientId || '');
   const name = String(req.body.name || '').trim();
   const tooth = String(req.body.tooth || '').trim();
@@ -291,7 +367,7 @@ app.post('/api/treatments', requireUser, asyncRoute(async (req, res) => {
   res.status(201).json({ ok: true });
 }));
 
-app.patch('/api/treatments/:id', requireUser, asyncRoute(async (req, res) => {
+app.patch('/api/treatments/:id', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const patientId = String(req.body.patientId || '');
   const name = String(req.body.name || '').trim();
   const tooth = String(req.body.tooth || '').trim();
@@ -308,7 +384,7 @@ app.patch('/api/treatments/:id', requireUser, asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/treatments/:id/payments', requireUser, asyncRoute(async (req, res) => {
+app.post('/api/treatments/:id/payments', requireUser, requireRoles('owner', 'dentist'), asyncRoute(async (req, res) => {
   const amount = Number(req.body.amount);
   const paymentDate = String(req.body.paymentDate || '').trim();
   const paymentMethod = String(req.body.paymentMethod || '').trim();
@@ -326,13 +402,13 @@ app.post('/api/treatments/:id/payments', requireUser, asyncRoute(async (req, res
   res.status(201).json({ ok: true });
 }));
 
-app.get('/api/treatments/:id/payments', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/treatments/:id/payments', requireUser, requireRoles('owner', 'dentist'), asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`select id, amount, payment_date, payment_method, notes, created_at from treatment_payments
     where treatment_id = $1 and owner_id = $2 order by payment_date desc, created_at desc`, [req.params.id, req.user.sub]);
   res.json({ payments: rows.map(row => ({ id: row.id, amount: row.amount, paymentDate: row.payment_date, paymentMethod: row.payment_method, notes: row.notes })) });
 }));
 
-app.patch('/api/payments/:id', requireUser, asyncRoute(async (req, res) => {
+app.patch('/api/payments/:id', requireUser, requireRoles('owner', 'dentist'), asyncRoute(async (req, res) => {
   const amount = Number(req.body.amount);
   const paymentDate = String(req.body.paymentDate || '').trim();
   const paymentMethod = String(req.body.paymentMethod || '').trim();
@@ -350,7 +426,7 @@ app.patch('/api/payments/:id', requireUser, asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.patch('/api/treatments/:id/status', requireUser, asyncRoute(async (req, res) => {
+app.patch('/api/treatments/:id/status', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const status = String(req.body.status || '');
   if (!['active', 'completed'].includes(status)) return res.status(400).json({ error: 'Estado no válido.' });
   const treatment = await pool.query('select treatment_name, status from treatments where id = $1 and owner_id = $2', [req.params.id, req.user.sub]);
@@ -361,7 +437,7 @@ app.patch('/api/treatments/:id/status', requireUser, asyncRoute(async (req, res)
   res.json({ ok: true });
 }));
 
-app.get('/api/odontogram', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/odontogram', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const patientId = String(req.query.patientId || '');
   if (!patientId) return res.status(400).json({ error: 'Selecciona un paciente.' });
   const { rows } = await pool.query(`select tooth_number, status, notes, updated_at from tooth_records
@@ -369,7 +445,7 @@ app.get('/api/odontogram', requireUser, asyncRoute(async (req, res) => {
   res.json({ records: rows.map(row => ({ toothNumber: row.tooth_number, status: row.status, notes: row.notes, updatedAt: row.updated_at })) });
 }));
 
-app.put('/api/odontogram/:toothNumber', requireUser, asyncRoute(async (req, res) => {
+app.put('/api/odontogram/:toothNumber', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
   const patientId = String(req.body.patientId || '');
   const toothNumber = String(req.params.toothNumber || '');
   const status = String(req.body.status || 'healthy');
@@ -434,7 +510,7 @@ app.patch('/api/appointments/:id', requireUser, asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/audit-events', requireUser, asyncRoute(async (req, res) => {
+app.get('/api/audit-events', requireUser, requireRoles('owner'), asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`select e.id, e.action, e.entity_type, e.entity_name, e.details, e.created_at, u.full_name as actor_name
     from audit_events e join users u on u.id = e.actor_id where e.owner_id = $1
     order by e.created_at desc limit 150`, [req.user.sub]);
