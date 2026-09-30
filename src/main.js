@@ -1,12 +1,14 @@
 import './style.css';
 import './patients.css';
 import './agenda.css';
+import './treatments.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
 let appointments = [];
 let patients = [];
 let editingPatient = null;
+let treatments = [];
 let agendaAppointments = [];
 let editingAppointment = null;
 let creatingFromAgenda = false;
@@ -83,9 +85,22 @@ function patientsPage() {
   document.querySelector('#patient-search').oninput = event => { const query = event.target.value.toLowerCase(); document.querySelectorAll('.patient-row').forEach(row => row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
-  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section !== 'Pacientes') toast(`${button.dataset.section} estará disponible próximamente.`); });
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); else if (button.dataset.section !== 'Pacientes') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadPatients() { patients = (await api('/api/patients')).patients; patientsPage(); }
+function treatmentModal() { return `<div class="modal-backdrop" id="treatment-modal"><form class="modal treatment-modal"><button type="button" class="modal-close" id="close-treatment-modal">×</button><p class="eyebrow">NUEVO TRATAMIENTO</p><h2>Agregar al historial</h2><label>Paciente<select required name="patientId"><option value="">Selecciona un paciente</option>${patients.map(patient => `<option value="${esc(patient.id)}">${esc(patient.fullName)}</option>`).join('')}</select></label><label>Tratamiento<input required name="name" placeholder="Ej. Restauración con resina"/></label><div class="form-row"><label>Pieza dental<input name="tooth" placeholder="Ej. 16"/></label><label>Costo estimado<input name="estimatedCost" type="number" min="0" step="0.01" placeholder="$0.00"/></label></div><label>Notas<textarea name="notes" placeholder="Diagnóstico, materiales o indicaciones"></textarea></label><p class="form-error" id="treatment-error"></p><button class="save-appointment">Guardar tratamiento</button></form></div>`; }
+function treatmentCard(treatment) { const price = treatment.estimatedCost == null ? 'Sin costo registrado' : new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN' }).format(treatment.estimatedCost); const complete = treatment.status === 'completed'; return `<article class="treatment-card"><div class="treatment-card-top"><div><span class="tooth-badge">${esc(treatment.tooth || '—')}</span><span class="status ${complete ? 'confirmed' : 'pending'}">${complete ? 'Finalizado' : 'Activo'}</span></div><button class="treatment-status" data-treatment-id="${esc(treatment.id)}" data-treatment-status="${complete ? 'active' : 'completed'}">${complete ? 'Reabrir' : 'Finalizar'}</button></div><h3>${esc(treatment.name)}</h3><p class="treatment-patient">${esc(treatment.patientName)}</p><p class="treatment-notes">${esc(treatment.notes || 'Sin notas clínicas adicionales.')}</p><footer><span>${price}</span><span>${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(treatment.createdAt))}</span></footer></article>`; }
+function treatmentsPage() {
+  const active = treatments.filter(treatment => treatment.status === 'active').length;
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth',true)}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Historial clínico</div><div class="header-actions"><button class="new-appointment" id="open-treatment-modal">${icon('plus')} Nuevo tratamiento</button></div></header><div class="content treatment-content"><div class="page-heading"><div><p class="eyebrow">HISTORIAL CLÍNICO</p><h1>Tratamientos</h1><p>${active} tratamiento${active === 1 ? '' : 's'} activo${active === 1 ? '' : 's'}.</p></div></div><div class="treatment-grid">${treatments.map(treatmentCard).join('') || '<section class="panel empty-treatment"><span>🦷</span><h2>Aún no hay tratamientos</h2><p>Registra el diagnóstico y plan de cada paciente para construir su historial.</p></section>'}</div></div></main></div>${treatmentModal()}`;
+  document.querySelector('#open-treatment-modal').onclick = () => { if (!patients.length) return toast('Primero registra un paciente.'); document.querySelector('#treatment-modal').classList.add('visible'); };
+  document.querySelector('#close-treatment-modal').onclick = () => document.querySelector('#treatment-modal').classList.remove('visible');
+  document.querySelector('#treatment-modal').onclick = event => { if (event.target.id === 'treatment-modal') event.currentTarget.classList.remove('visible'); };
+  document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
+  document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Tratamientos') toast(`${button.dataset.section} estará disponible próximamente.`); });
+}
+async function loadTreatments() { const [treatmentData, patientData] = await Promise.all([api('/api/treatments'), api('/api/patients')]); treatments = treatmentData.treatments; patients = patientData.patients; treatmentsPage(); }
 function agendaModal() { return `<div class="modal-backdrop" id="agenda-modal"><form class="modal agenda-modal"><button type="button" class="modal-close" id="close-agenda-modal">×</button><p class="eyebrow">EDITAR CITA</p><h2>Detalles de la cita</h2><label>Paciente<input disabled name="patientName"/></label><div class="form-row"><label>Fecha<input required name="date" type="date"/></label><label>Hora<input required name="time" type="time"/></label></div><label>Tipo de cita<select name="appointmentType"><option>Limpieza dental</option><option>Valoración · primera cita</option><option>Revisión de tratamiento</option><option>Ajuste de ortodoncia</option></select></label><div class="form-row"><label>Duración<select name="durationMinutes"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Estado<select name="status"><option value="pending">Pendiente</option><option value="confirmed">Confirmada</option><option value="completed">Atendida</option><option value="cancelled">Cancelada</option></select></label></div><p class="form-error" id="agenda-error"></p><button class="save-appointment">Guardar cambios</button></form></div>`; }
 function agendaCard(appointment) { return `<button class="agenda-card status-${esc(appointment.statusKey)}" data-edit-appointment="${esc(appointment.id)}"><b>${esc(appointment.time)}</b><span>${esc(appointment.patient)}</span><small>${esc(appointment.type)}</small></button>`; }
 function agendaPage() {
@@ -102,7 +117,7 @@ function agendaPage() {
   document.querySelector('#agenda-modal').onclick = event => { if (event.target.id === 'agenda-modal') event.currentTarget.classList.remove('visible'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
-  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Agenda') toast(`${button.dataset.section} estará disponible próximamente.`); });
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); else if (button.dataset.section !== 'Agenda') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadAgenda() { const from = dateValue(agendaStart); const to = dateValue(addDays(agendaStart, 6)); agendaAppointments = (await api(`/api/appointments?from=${from}&to=${to}`)).appointments; agendaPage(); }
 function bindDashboard() {
@@ -112,11 +127,11 @@ function bindDashboard() {
   document.querySelector('#search').oninput = event => { const query = event.target.value.toLowerCase(); document.querySelectorAll('.appointment-card').forEach(element => element.style.display = element.textContent.toLowerCase().includes(query) ? '' : 'none'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
-  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section !== 'Inicio') toast(`${button.dataset.section} estará disponible próximamente.`); });
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); else if (button.dataset.section !== 'Inicio') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
 document.addEventListener('submit', async event => {
-  if (!event.target.matches('.modal:not(.patient-modal)')) return;
+  if (!event.target.matches('.modal:not(.patient-modal):not(.treatment-modal)')) return;
   event.preventDefault();
   const form = event.target;
   const isEditing = event.target.matches('.agenda-modal') && editingAppointment;
@@ -158,6 +173,25 @@ document.addEventListener('submit', async event => {
     button.textContent = 'Guardar paciente';
   }
 });
+document.addEventListener('submit', async event => {
+  if (!event.target.matches('.treatment-modal')) return;
+  event.preventDefault();
+  const form = event.target;
+  const error = document.querySelector('#treatment-error');
+  const button = form.querySelector('.save-appointment');
+  error.textContent = '';
+  button.disabled = true;
+  button.textContent = 'Guardando…';
+  try {
+    await api('/api/treatments', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+    toast('Tratamiento agregado al historial');
+    await loadTreatments();
+  } catch (err) {
+    error.textContent = err.message;
+    button.disabled = false;
+    button.textContent = 'Guardar tratamiento';
+  }
+});
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-edit-patient]');
   if (!button) return;
@@ -174,6 +208,16 @@ document.addEventListener('click', event => {
   modal.querySelector('h2').textContent = 'Actualizar expediente';
   form.querySelector('.save-appointment').textContent = 'Guardar cambios';
   modal.classList.add('visible');
+});
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-treatment-id]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api(`/api/treatments/${button.dataset.treatmentId}/status`, { method:'PATCH', body:JSON.stringify({ status:button.dataset.treatmentStatus }) });
+    toast(button.dataset.treatmentStatus === 'completed' ? 'Tratamiento marcado como finalizado' : 'Tratamiento reabierto');
+    await loadTreatments();
+  } catch (err) { toast(err.message); button.disabled = false; }
 });
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-edit-appointment]');

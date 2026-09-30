@@ -43,6 +43,14 @@ async function migrate() {
       notes text, created_at timestamptz not null default now()
     );
     create index if not exists appointments_owner_starts_idx on appointments (owner_id, starts_at);
+    create table if not exists treatments (
+      id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
+      patient_id uuid not null references patients(id) on delete cascade, treatment_name text not null,
+      tooth text, status text not null default 'active' check (status in ('active', 'completed')),
+      estimated_cost numeric(12,2), notes text, created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create index if not exists treatments_owner_patient_idx on treatments (owner_id, patient_id);
   `);
 }
 
@@ -168,6 +176,36 @@ app.patch('/api/patients/:id', requireUser, asyncRoute(async (req, res) => {
   const { rowCount } = await pool.query(`update patients set full_name = $1, phone = $2, email = $3, allergies = $4, notes = $5
     where id = $6 and owner_id = $7`, [fullName, phone || null, email || null, allergies || null, notes || null, req.params.id, req.user.sub]);
   if (!rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  res.json({ ok: true });
+}));
+
+app.get('/api/treatments', requireUser, asyncRoute(async (req, res) => {
+  const { rows } = await pool.query(`select t.id, t.treatment_name, t.tooth, t.status, t.estimated_cost, t.notes, t.created_at,
+    p.full_name as patient_name from treatments t join patients p on p.id = t.patient_id
+    where t.owner_id = $1 order by case when t.status = 'active' then 0 else 1 end, t.created_at desc`, [req.user.sub]);
+  res.json({ treatments: rows.map(row => ({ id: row.id, name: row.treatment_name, tooth: row.tooth, status: row.status,
+    estimatedCost: row.estimated_cost, notes: row.notes, createdAt: row.created_at, patientName: row.patient_name })) });
+}));
+
+app.post('/api/treatments', requireUser, asyncRoute(async (req, res) => {
+  const patientId = String(req.body.patientId || '');
+  const name = String(req.body.name || '').trim();
+  const tooth = String(req.body.tooth || '').trim();
+  const notes = String(req.body.notes || '').trim();
+  const estimatedCost = req.body.estimatedCost === '' || req.body.estimatedCost == null ? null : Number(req.body.estimatedCost);
+  if (!patientId || name.length < 2 || (estimatedCost !== null && (!Number.isFinite(estimatedCost) || estimatedCost < 0))) return res.status(400).json({ error: 'Selecciona un paciente y completa los datos del tratamiento.' });
+  const exists = await pool.query('select 1 from patients where id = $1 and owner_id = $2', [patientId, req.user.sub]);
+  if (!exists.rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  await pool.query(`insert into treatments (id, owner_id, patient_id, treatment_name, tooth, estimated_cost, notes)
+    values ($1, $2, $3, $4, $5, $6, $7)`, [crypto.randomUUID(), req.user.sub, patientId, name, tooth || null, estimatedCost, notes || null]);
+  res.status(201).json({ ok: true });
+}));
+
+app.patch('/api/treatments/:id/status', requireUser, asyncRoute(async (req, res) => {
+  const status = String(req.body.status || '');
+  if (!['active', 'completed'].includes(status)) return res.status(400).json({ error: 'Estado no válido.' });
+  const { rowCount } = await pool.query('update treatments set status = $1, updated_at = now() where id = $2 and owner_id = $3', [status, req.params.id, req.user.sub]);
+  if (!rowCount) return res.status(404).json({ error: 'Tratamiento no encontrado.' });
   res.json({ ok: true });
 }));
 

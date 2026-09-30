@@ -36,3 +36,18 @@ create table if not exists appointments (
 );
 
 create index if not exists appointments_owner_starts_idx on appointments (owner_id, starts_at);
+
+create table if not exists treatments (
+  id uuid primary key,
+  owner_id uuid not null references users(id) on delete cascade,
+  patient_id uuid not null references patients(id) on delete cascade,
+  treatment_name text not null,
+  tooth text,
+  status text not null default 'active' check (status in ('active', 'completed')),
+  estimated_cost numeric(12,2),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists treatments_owner_patient_idx on treatments (owner_id, patient_id);
