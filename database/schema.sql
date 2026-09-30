@@ -93,3 +93,18 @@ create table if not exists treatment_payments (
 );
 
 create index if not exists treatment_payments_owner_treatment_idx on treatment_payments (owner_id, treatment_id, payment_date desc);
+
+-- Bitácora de auditoría. La aplicación solo agrega eventos; no expone una ruta para eliminarlos.
+create table if not exists audit_events (
+  id uuid primary key,
+  owner_id uuid not null references users(id) on delete cascade,
+  actor_id uuid not null references users(id) on delete restrict,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  entity_name text,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists audit_events_owner_created_idx on audit_events (owner_id, created_at desc);

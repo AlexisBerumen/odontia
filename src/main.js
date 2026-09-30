@@ -8,6 +8,7 @@ import './profile.css';
 import './context-nav.css';
 import './payments.css';
 import './payment-history.css';
+import './audit.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -26,6 +27,7 @@ let selectedTooth = '11';
 let agendaAppointments = [];
 let editingAppointment = null;
 let creatingFromAgenda = false;
+let auditEvents = [];
 let filter = 'Todas';
 const today = new Date();
 let agendaStart = mondayOf(today);
@@ -77,6 +79,38 @@ function authPage() {
 }
 
 const nav = (label, name, active = false) => `<button class="nav-item ${active ? 'active' : ''}" data-section="${label}">${icon(name)}<span>${label}</span></button>`;
+const auditLabels = {
+  'patient.created':'Expediente creado', 'patient.created_from_appointment':'Paciente creado al agendar', 'patient.updated':'Expediente actualizado',
+  'clinical_note.created':'Evolución clínica registrada', 'treatment.created':'Tratamiento creado', 'treatment.updated':'Tratamiento actualizado',
+  'treatment.status_updated':'Estado de tratamiento actualizado', 'payment.created':'Abono registrado', 'payment.updated':'Abono corregido',
+  'odontogram.created':'Pieza registrada en odontograma', 'odontogram.updated':'Pieza actualizada en odontograma',
+  'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada',
+};
+function auditDetail(event) {
+  const data = event.details || {};
+  if (Array.isArray(data.fields) && data.fields.length) return `Campos modificados: ${data.fields.join(', ')}.`;
+  if (event.action === 'payment.created') return `Monto registrado: ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.amount || 0))}.`;
+  if (event.action === 'payment.updated') return `Monto corregido de ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.previousAmount || 0))} a ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.newAmount || 0))}.`;
+  if (data.previousStatus || data.newStatus) return `Estado: ${data.previousStatus || 'sin registro'} → ${data.newStatus || 'sin registro'}.`;
+  if (data.procedure) return 'Se añadió una evolución al expediente.';
+  return 'Registro de seguridad.';
+}
+function auditPage() {
+  const date = value => new Intl.DateTimeFormat('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth')}${nav('Bitácora','chart',true)}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Seguridad</div><div class="header-actions"><button class="new-appointment audit-refresh" id="audit-refresh">Actualizar</button></div></header><div class="content audit-content"><div class="page-heading"><div><p class="eyebrow">HUELLA DE SEGURIDAD</p><h1>Bitácora de cambios</h1><p>Consulta quién registró o corrigió información. Los eventos no se pueden editar desde Odontia.</p></div></div><section class="panel audit-list">${auditEvents.map(event => `<article class="audit-event"><div class="audit-mark">${icon('chart')}</div><div class="audit-main"><strong>${esc(auditLabels[event.action] || 'Cambio registrado')}</strong><span>${esc(event.entityName || 'Sin referencia')}</span><p>${esc(auditDetail(event))}</p></div><div class="audit-meta"><b>${esc(event.actorName)}</b><time>${date(event.createdAt)}</time></div></article>`).join('') || '<p class="empty">Todavía no hay cambios registrados. Los nuevos movimientos aparecerán aquí.</p>'}</section></div></main></div>`;
+  document.querySelector('#audit-refresh').onclick = loadAudit;
+  document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
+  document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); });
+}
+async function loadAudit() { auditEvents = (await api('/api/audit-events')).events; auditPage(); }
+document.addEventListener('click', event => {
+  const section = event.target.closest('[data-section]');
+  if (section?.dataset.section !== 'Reportes') return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  loadAudit().catch(error => toast(error.message));
+}, true);
 function card(a, index) { return `<article class="appointment-card"><time>${esc(a.time)}</time><div class="appointment-line"></div><div class="avatar ${['aqua','purple','orange','blue'][index % 4]}">${esc(a.initials)}</div><div class="appointment-info"><strong>${esc(a.patient)}</strong><span>${esc(a.type)} <i>•</i> ${esc(a.duration)}</span></div><span class="status ${a.status === 'Confirmada' ? 'confirmed' : 'pending'}">${esc(a.status)}</span></article>`; }
 function schedule() {
   const shown = filter === 'Todas' ? appointments : appointments.filter(item => item.status === filter);

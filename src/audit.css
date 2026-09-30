@@ -1,0 +1,17 @@
+.audit-content { max-width: 1120px; }
+.audit-list { padding: 0; overflow: hidden; }
+.audit-event { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 15px; align-items: start; padding: 18px 22px; border-bottom: 1px solid #e5eeee; }
+.audit-event:last-child { border-bottom: 0; }
+.audit-mark { width: 38px; height: 38px; display: grid; place-items: center; color: #087a7d; background: #e7f4f3; border-radius: 11px; }
+.audit-mark svg { width: 19px; height: 19px; }
+.audit-main { min-width: 0; display: grid; gap: 3px; }
+.audit-main strong { color: #153f4c; }
+.audit-main span, .audit-main p { margin: 0; color: #68808a; font-size: .9rem; }
+.audit-main p { color: #46636d; }
+.audit-meta { display: grid; gap: 3px; text-align: right; color: #68808a; font-size: .82rem; white-space: nowrap; }
+.audit-meta b { color: #315562; font-weight: 700; }
+.audit-refresh { min-width: auto; padding-inline: 18px; }
+@media (max-width: 680px) {
+  .audit-event { grid-template-columns: 38px minmax(0, 1fr); padding: 16px; }
+  .audit-meta { grid-column: 2; text-align: left; grid-auto-flow: column; justify-content: start; gap: 8px; }
+}
