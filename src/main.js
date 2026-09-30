@@ -127,7 +127,7 @@ document.addEventListener('submit', async event => {
   button.textContent = 'Guardando…';
   try {
     const values = Object.fromEntries(new FormData(form));
-    await api(isEditing ? `/api/appointments/${editingAppointment.id}` : '/api/appointments', { method:isEditing ? 'PATCH' : 'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00`, durationMinutes:Number(values.durationMinutes || 30), ...(isEditing ? { status:values.status } : {}) }) });
+    await api(isEditing ? `/api/appointments/${editingAppointment.id}` : '/api/appointments', { method:isEditing ? 'PATCH' : 'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00-06:00`, durationMinutes:Number(values.durationMinutes || 30), ...(isEditing ? { status:values.status } : {}) }) });
     toast(isEditing ? 'Cita actualizada correctamente' : 'Cita guardada en tu agenda');
     editingAppointment = null;
     if (isEditing || creatingFromAgenda) { creatingFromAgenda = false; await loadAgenda(); } else await loadDashboard();
