@@ -243,11 +243,11 @@ app.post('/api/patients/:id/clinical-notes', requireUser, asyncRoute(async (req,
 
 app.get('/api/treatments', requireUser, asyncRoute(async (req, res) => {
   const { rows } = await pool.query(`select t.id, t.patient_id, t.treatment_name, t.tooth, t.status, t.estimated_cost, t.notes, t.created_at,
-    p.full_name as patient_name, coalesce(sum(tp.amount), 0) as paid_amount from treatments t join patients p on p.id = t.patient_id
+    p.full_name as patient_name, coalesce(sum(tp.amount), 0) as paid_amount, count(tp.id)::integer as payment_count from treatments t join patients p on p.id = t.patient_id
     left join treatment_payments tp on tp.treatment_id = t.id and tp.owner_id = t.owner_id
     where t.owner_id = $1 group by t.id, p.full_name order by case when t.status = 'active' then 0 else 1 end, t.created_at desc`, [req.user.sub]);
   res.json({ treatments: rows.map(row => ({ id: row.id, name: row.treatment_name, tooth: row.tooth, status: row.status,
-    patientId: row.patient_id, estimatedCost: row.estimated_cost, paidAmount: row.paid_amount, notes: row.notes, createdAt: row.created_at, patientName: row.patient_name })) });
+    patientId: row.patient_id, estimatedCost: row.estimated_cost, paidAmount: row.paid_amount, paymentCount: row.payment_count, notes: row.notes, createdAt: row.created_at, patientName: row.patient_name })) });
 }));
 
 app.post('/api/treatments', requireUser, asyncRoute(async (req, res) => {
@@ -294,6 +294,29 @@ app.post('/api/treatments/:id/payments', requireUser, asyncRoute(async (req, res
   await pool.query(`insert into treatment_payments (id, owner_id, treatment_id, amount, payment_date, payment_method, notes)
     values ($1, $2, $3, $4, coalesce(nullif($5, '')::date, current_date), $6, $7)`, [crypto.randomUUID(), req.user.sub, req.params.id, amount, paymentDate, paymentMethod || null, notes || null]);
   res.status(201).json({ ok: true });
+}));
+
+app.get('/api/treatments/:id/payments', requireUser, asyncRoute(async (req, res) => {
+  const { rows } = await pool.query(`select id, amount, payment_date, payment_method, notes, created_at from treatment_payments
+    where treatment_id = $1 and owner_id = $2 order by payment_date desc, created_at desc`, [req.params.id, req.user.sub]);
+  res.json({ payments: rows.map(row => ({ id: row.id, amount: row.amount, paymentDate: row.payment_date, paymentMethod: row.payment_method, notes: row.notes })) });
+}));
+
+app.patch('/api/payments/:id', requireUser, asyncRoute(async (req, res) => {
+  const amount = Number(req.body.amount);
+  const paymentDate = String(req.body.paymentDate || '').trim();
+  const paymentMethod = String(req.body.paymentMethod || '').trim();
+  const notes = String(req.body.notes || '').trim();
+  if (!Number.isFinite(amount) || amount <= 0 || (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate))) return res.status(400).json({ error: 'Registra un monto y fecha válidos.' });
+  const payment = await pool.query(`select tp.treatment_id, t.estimated_cost from treatment_payments tp join treatments t on t.id = tp.treatment_id
+    where tp.id = $1 and tp.owner_id = $2 and t.owner_id = $2`, [req.params.id, req.user.sub]);
+  if (!payment.rowCount) return res.status(404).json({ error: 'Abono no encontrado.' });
+  const total = Number(payment.rows[0].estimated_cost || 0);
+  const paid = await pool.query('select coalesce(sum(amount), 0) as total from treatment_payments where treatment_id = $1 and owner_id = $2 and id <> $3', [payment.rows[0].treatment_id, req.user.sub, req.params.id]);
+  if (total > 0 && Number(paid.rows[0].total || 0) + amount > total) return res.status(400).json({ error: 'El abono excede el saldo pendiente.' });
+  await pool.query(`update treatment_payments set amount = $1, payment_date = coalesce(nullif($2, '')::date, current_date), payment_method = $3, notes = $4
+    where id = $5 and owner_id = $6`, [amount, paymentDate, paymentMethod || null, notes || null, req.params.id, req.user.sub]);
+  res.json({ ok: true });
 }));
 
 app.patch('/api/treatments/:id/status', requireUser, asyncRoute(async (req, res) => {
