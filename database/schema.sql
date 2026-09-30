@@ -51,3 +51,14 @@ create table if not exists treatments (
 );
 
 create index if not exists treatments_owner_patient_idx on treatments (owner_id, patient_id);
+
+create table if not exists tooth_records (
+  id uuid primary key,
+  owner_id uuid not null references users(id) on delete cascade,
+  patient_id uuid not null references patients(id) on delete cascade,
+  tooth_number text not null,
+  status text not null default 'healthy' check (status in ('healthy', 'treatment', 'missing', 'watch')),
+  notes text,
+  updated_at timestamptz not null default now(),
+  unique (owner_id, patient_id, tooth_number)
+);

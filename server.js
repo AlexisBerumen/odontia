@@ -51,6 +51,13 @@ async function migrate() {
       updated_at timestamptz not null default now()
     );
     create index if not exists treatments_owner_patient_idx on treatments (owner_id, patient_id);
+    create table if not exists tooth_records (
+      id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
+      patient_id uuid not null references patients(id) on delete cascade, tooth_number text not null,
+      status text not null default 'healthy' check (status in ('healthy', 'treatment', 'missing', 'watch')),
+      notes text, updated_at timestamptz not null default now(),
+      unique (owner_id, patient_id, tooth_number)
+    );
   `);
 }
 
@@ -206,6 +213,28 @@ app.patch('/api/treatments/:id/status', requireUser, asyncRoute(async (req, res)
   if (!['active', 'completed'].includes(status)) return res.status(400).json({ error: 'Estado no válido.' });
   const { rowCount } = await pool.query('update treatments set status = $1, updated_at = now() where id = $2 and owner_id = $3', [status, req.params.id, req.user.sub]);
   if (!rowCount) return res.status(404).json({ error: 'Tratamiento no encontrado.' });
+  res.json({ ok: true });
+}));
+
+app.get('/api/odontogram', requireUser, asyncRoute(async (req, res) => {
+  const patientId = String(req.query.patientId || '');
+  if (!patientId) return res.status(400).json({ error: 'Selecciona un paciente.' });
+  const { rows } = await pool.query(`select tooth_number, status, notes, updated_at from tooth_records
+    where owner_id = $1 and patient_id = $2 order by tooth_number`, [req.user.sub, patientId]);
+  res.json({ records: rows.map(row => ({ toothNumber: row.tooth_number, status: row.status, notes: row.notes, updatedAt: row.updated_at })) });
+}));
+
+app.put('/api/odontogram/:toothNumber', requireUser, asyncRoute(async (req, res) => {
+  const patientId = String(req.body.patientId || '');
+  const toothNumber = String(req.params.toothNumber || '');
+  const status = String(req.body.status || 'healthy');
+  const notes = String(req.body.notes || '').trim();
+  if (!patientId || !/^(?:[1-4][1-8]|[5-8][1-5])$/.test(toothNumber) || !['healthy', 'treatment', 'missing', 'watch'].includes(status)) return res.status(400).json({ error: 'Datos de pieza dental no válidos.' });
+  const patient = await pool.query('select 1 from patients where id = $1 and owner_id = $2', [patientId, req.user.sub]);
+  if (!patient.rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  await pool.query(`insert into tooth_records (id, owner_id, patient_id, tooth_number, status, notes)
+    values ($1, $2, $3, $4, $5, $6)
+    on conflict (owner_id, patient_id, tooth_number) do update set status = excluded.status, notes = excluded.notes, updated_at = now()`, [crypto.randomUUID(), req.user.sub, patientId, toothNumber, status, notes || null]);
   res.json({ ok: true });
 }));
 

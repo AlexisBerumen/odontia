@@ -2,6 +2,7 @@ import './style.css';
 import './patients.css';
 import './agenda.css';
 import './treatments.css';
+import './odontogram.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -9,6 +10,9 @@ let appointments = [];
 let patients = [];
 let editingPatient = null;
 let treatments = [];
+let odontogramRecords = [];
+let odontogramPatientId = '';
+let selectedTooth = '11';
 let agendaAppointments = [];
 let editingAppointment = null;
 let creatingFromAgenda = false;
@@ -93,6 +97,8 @@ function treatmentCard(treatment) { const price = treatment.estimatedCost == nul
 function treatmentsPage() {
   const active = treatments.filter(treatment => treatment.status === 'active').length;
   document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth',true)}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Historial clínico</div><div class="header-actions"><button class="new-appointment" id="open-treatment-modal">${icon('plus')} Nuevo tratamiento</button></div></header><div class="content treatment-content"><div class="page-heading"><div><p class="eyebrow">HISTORIAL CLÍNICO</p><h1>Tratamientos</h1><p>${active} tratamiento${active === 1 ? '' : 's'} activo${active === 1 ? '' : 's'}.</p></div></div><div class="treatment-grid">${treatments.map(treatmentCard).join('') || '<section class="panel empty-treatment"><span>🦷</span><h2>Aún no hay tratamientos</h2><p>Registra el diagnóstico y plan de cada paciente para construir su historial.</p></section>'}</div></div></main></div>${treatmentModal()}`;
+  document.querySelector('#open-treatment-modal').insertAdjacentHTML('beforebegin', '<button class="odontogram-launch" id="open-odontogram">Odontograma</button>');
+  document.querySelector('#open-odontogram').onclick = loadOdontogram;
   document.querySelector('#open-treatment-modal').onclick = () => { if (!patients.length) return toast('Primero registra un paciente.'); document.querySelector('#treatment-modal').classList.add('visible'); };
   document.querySelector('#close-treatment-modal').onclick = () => document.querySelector('#treatment-modal').classList.remove('visible');
   document.querySelector('#treatment-modal').onclick = event => { if (event.target.id === 'treatment-modal') event.currentTarget.classList.remove('visible'); };
@@ -101,6 +107,18 @@ function treatmentsPage() {
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Tratamientos') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadTreatments() { const [treatmentData, patientData] = await Promise.all([api('/api/treatments'), api('/api/patients')]); treatments = treatmentData.treatments; patients = patientData.patients; treatmentsPage(); }
+function toothButton(tooth) { const record = odontogramRecords.find(item => item.toothNumber === tooth); const status = record?.status || 'healthy'; return `<button class="tooth ${status} ${selectedTooth === tooth ? 'selected-tooth' : ''}" data-tooth="${tooth}"><span>♧</span><b>${tooth}</b></button>`; }
+function odontogramPage() {
+  const selectedRecord = odontogramRecords.find(item => item.toothNumber === selectedTooth) || { status:'healthy', notes:'' };
+  const patient = patients.find(item => item.id === odontogramPatientId);
+  const quadrants = [['18','17','16','15','14','13','12','11'],['21','22','23','24','25','26','27','28'],['48','47','46','45','44','43','42','41'],['31','32','33','34','35','36','37','38']];
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth',true)}${nav('Reportes','chart')}</nav><div class="sidebar-bottom"><button class="nav-item" id="back-treatments">${icon('chevron')}<span>Volver a tratamientos</span></button><div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div></div></div></aside><main><header class="topbar"><div class="agenda-title-small">Odontograma</div></header><div class="content odontogram-content"><div class="page-heading"><div><p class="eyebrow">EXPEDIENTE DENTAL</p><h1>Odontograma</h1><p>Registra el estado de cada pieza dental del paciente.</p></div></div><label class="patient-picker">Paciente<select id="odontogram-patient">${patients.map(item => `<option value="${esc(item.id)}" ${item.id === odontogramPatientId ? 'selected' : ''}>${esc(item.fullName)}</option>`).join('')}</select></label>${patient ? `<div class="odontogram-layout"><section class="odontogram-board panel"><div class="arch upper">${quadrants[0].map(toothButton).join('')}<i></i>${quadrants[1].map(toothButton).join('')}</div><div class="mouth-divider"><span>MAXILAR</span><span>MANDÍBULA</span></div><div class="arch lower">${quadrants[2].map(toothButton).join('')}<i></i>${quadrants[3].map(toothButton).join('')}</div><div class="legend"><span><i class="healthy"></i>Sano</span><span><i class="treatment"></i>En tratamiento</span><span><i class="watch"></i>Vigilar</span><span><i class="missing"></i>Ausente</span></div></section><aside class="panel tooth-detail"><p class="eyebrow">PIEZA SELECCIONADA</p><h2>Pieza ${selectedTooth}</h2><form class="odontogram-form"><label>Estado<select name="status"><option value="healthy" ${selectedRecord.status === 'healthy' ? 'selected' : ''}>Sano</option><option value="treatment" ${selectedRecord.status === 'treatment' ? 'selected' : ''}>En tratamiento</option><option value="watch" ${selectedRecord.status === 'watch' ? 'selected' : ''}>Vigilar</option><option value="missing" ${selectedRecord.status === 'missing' ? 'selected' : ''}>Ausente</option></select></label><label>Notas clínicas<textarea name="notes" placeholder="Diagnóstico, tratamiento o evolución">${esc(selectedRecord.notes || '')}</textarea></label><p class="form-error" id="tooth-error"></p><button class="save-appointment">Guardar pieza</button></form></aside></div>` : '<section class="panel empty-treatment"><h2>Registra un paciente primero</h2></section>'}</div></main></div>`;
+  document.querySelector('#back-treatments').onclick = loadTreatments;
+  const picker = document.querySelector('#odontogram-patient');
+  if (picker) picker.onchange = event => { odontogramPatientId = event.target.value; selectedTooth = '11'; loadOdontogram(); };
+  document.querySelectorAll('[data-tooth]').forEach(button => button.onclick = () => { selectedTooth = button.dataset.tooth; odontogramPage(); });
+}
+async function loadOdontogram() { if (!odontogramPatientId) odontogramPatientId = patients[0]?.id || ''; if (!odontogramPatientId) return odontogramPage(); odontogramRecords = (await api(`/api/odontogram?patientId=${odontogramPatientId}`)).records; odontogramPage(); }
 function agendaModal() { return `<div class="modal-backdrop" id="agenda-modal"><form class="modal agenda-modal"><button type="button" class="modal-close" id="close-agenda-modal">×</button><p class="eyebrow">EDITAR CITA</p><h2>Detalles de la cita</h2><label>Paciente<input disabled name="patientName"/></label><div class="form-row"><label>Fecha<input required name="date" type="date"/></label><label>Hora<input required name="time" type="time"/></label></div><label>Tipo de cita<select name="appointmentType"><option>Limpieza dental</option><option>Valoración · primera cita</option><option>Revisión de tratamiento</option><option>Ajuste de ortodoncia</option></select></label><div class="form-row"><label>Duración<select name="durationMinutes"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Estado<select name="status"><option value="pending">Pendiente</option><option value="confirmed">Confirmada</option><option value="completed">Atendida</option><option value="cancelled">Cancelada</option></select></label></div><p class="form-error" id="agenda-error"></p><button class="save-appointment">Guardar cambios</button></form></div>`; }
 function agendaCard(appointment) { return `<button class="agenda-card status-${esc(appointment.statusKey)}" data-edit-appointment="${esc(appointment.id)}"><b>${esc(appointment.time)}</b><span>${esc(appointment.patient)}</span><small>${esc(appointment.type)}</small></button>`; }
 function agendaPage() {
@@ -190,6 +208,26 @@ document.addEventListener('submit', async event => {
     error.textContent = err.message;
     button.disabled = false;
     button.textContent = 'Guardar tratamiento';
+  }
+});
+document.addEventListener('submit', async event => {
+  if (!event.target.matches('.odontogram-form')) return;
+  event.preventDefault();
+  const form = event.target;
+  const error = document.querySelector('#tooth-error');
+  const button = form.querySelector('.save-appointment');
+  error.textContent = '';
+  button.disabled = true;
+  button.textContent = 'Guardando…';
+  try {
+    const values = Object.fromEntries(new FormData(form));
+    await api(`/api/odontogram/${selectedTooth}`, { method:'PUT', body:JSON.stringify({ patientId:odontogramPatientId, ...values }) });
+    toast(`Pieza ${selectedTooth} actualizada`);
+    await loadOdontogram();
+  } catch (err) {
+    error.textContent = err.message;
+    button.disabled = false;
+    button.textContent = 'Guardar pieza';
   }
 });
 document.addEventListener('click', event => {
