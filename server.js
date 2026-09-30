@@ -55,6 +55,11 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+// Las respuestas de sesión y agenda no deben quedar en la caché del navegador.
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 const authAttempts = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Demasiados intentos. Intenta de nuevo en unos minutos.' } });
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

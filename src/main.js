@@ -24,7 +24,7 @@ const icon = name => ({
 }[name] || '');
 
 async function api(url, options = {}) {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type':'application/json', ...(token ? { Authorization:`Bearer ${token}` } : {}), ...options.headers } });
+  const response = await fetch(url, { ...options, cache:'no-store', headers: { 'Content-Type':'application/json', ...(token ? { Authorization:`Bearer ${token}` } : {}), ...options.headers } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || 'No fue posible completar la operación.');
   return body;
@@ -65,13 +65,32 @@ function bindDashboard() {
   document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => { filter = button.dataset.filter; dashboard(); });
   const open = () => document.querySelector('#modal').classList.add('visible'); document.querySelector('#open-modal').onclick = open; document.querySelector('#open-modal-2').onclick = open; document.querySelector('#close-modal').onclick = () => document.querySelector('#modal').classList.remove('visible');
   document.querySelector('#modal').onclick = event => { if (event.target.id === 'modal') event.currentTarget.classList.remove('visible'); };
-  document.querySelector('.modal form').onsubmit = async event => { event.preventDefault(); const form = event.currentTarget; const error = document.querySelector('#appointment-error'); const button = form.querySelector('.save-appointment'); error.textContent = ''; button.disabled = true; try { const values = Object.fromEntries(new FormData(form)); await api('/api/appointments', { method:'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00`, durationMinutes:30 }) }); toast('Cita guardada en tu agenda'); await loadDashboard(); } catch (err) { error.textContent = err.message; button.disabled = false; } };
   document.querySelector('#search').oninput = event => { const query = event.target.value.toLowerCase(); document.querySelectorAll('.appointment-card').forEach(element => element.style.display = element.textContent.toLowerCase().includes(query) ? '' : 'none'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section !== 'Inicio') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
+document.addEventListener('submit', async event => {
+  if (!event.target.matches('.modal')) return;
+  event.preventDefault();
+  const form = event.target;
+  const error = document.querySelector('#appointment-error');
+  const button = form.querySelector('.save-appointment');
+  error.textContent = '';
+  button.disabled = true;
+  button.textContent = 'Guardando…';
+  try {
+    const values = Object.fromEntries(new FormData(form));
+    await api('/api/appointments', { method:'POST', body:JSON.stringify({ patientName:values.patientName, appointmentType:values.appointmentType, startsAt:`${values.date}T${values.time}:00`, durationMinutes:30 }) });
+    toast('Cita guardada en tu agenda');
+    await loadDashboard();
+  } catch (err) {
+    error.textContent = err.message;
+    button.disabled = false;
+    button.textContent = 'Guardar cita';
+  }
+});
 function toast(message) { const element = document.createElement('div'); element.className = 'toast'; element.textContent = message; document.body.append(element); setTimeout(() => element.remove(), 2800); }
 async function boot() { if (!token) return authPage(); try { user = (await api('/api/auth/me')).user; await loadDashboard(); } catch { localStorage.removeItem('odontia-token'); token = null; authPage(); } }
 boot();
