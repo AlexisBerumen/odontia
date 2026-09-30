@@ -151,6 +151,19 @@ app.post('/api/patients', requireUser, asyncRoute(async (req, res) => {
   res.status(201).json({ id });
 }));
 
+app.patch('/api/patients/:id', requireUser, asyncRoute(async (req, res) => {
+  const fullName = String(req.body.fullName || '').trim();
+  const phone = String(req.body.phone || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const allergies = String(req.body.allergies || '').trim();
+  const notes = String(req.body.notes || '').trim();
+  if (fullName.length < 2 || (email && !emailPattern.test(email))) return res.status(400).json({ error: 'Agrega un nombre y, si aplica, un correo válido.' });
+  const { rowCount } = await pool.query(`update patients set full_name = $1, phone = $2, email = $3, allergies = $4, notes = $5
+    where id = $6 and owner_id = $7`, [fullName, phone || null, email || null, allergies || null, notes || null, req.params.id, req.user.sub]);
+  if (!rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  res.json({ ok: true });
+}));
+
 app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const patientName = String(req.body.patientName || '').trim();
   const appointmentType = String(req.body.appointmentType || '').trim();

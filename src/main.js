@@ -5,6 +5,7 @@ let token = localStorage.getItem('odontia-token');
 let user;
 let appointments = [];
 let patients = [];
+let editingPatient = null;
 let filter = 'Todas';
 const today = new Date();
 const isoToday = today.toISOString().slice(0, 10);
@@ -64,10 +65,10 @@ function dashboard() {
   bindDashboard();
 }
 function patientModal() { return `<div class="modal-backdrop" id="patient-modal"><form class="modal patient-modal"><button type="button" class="modal-close" id="close-patient-modal">×</button><p class="eyebrow">NUEVO PACIENTE</p><h2>Crear expediente</h2><label>Nombre completo<input required name="fullName" placeholder="Nombre completo"/></label><div class="form-row"><label>Teléfono<input name="phone" type="tel" placeholder="55 1234 5678"/></label><label>Correo<input name="email" type="email" placeholder="correo@ejemplo.com"/></label></div><label>Alergias o consideraciones<textarea name="allergies" placeholder="Ej. alergia a penicilina"></textarea></label><label>Notas clínicas iniciales<textarea name="notes" placeholder="Observaciones relevantes"></textarea></label><p class="form-error" id="patient-error"></p><button class="save-appointment">Guardar paciente</button></form></div>`; }
-function patientRow(patient) { return `<article class="patient-row"><div class="avatar purple">${esc(initials(patient.fullName))}</div><div class="patient-name"><strong>${esc(patient.fullName)}</strong><span>${esc(patient.phone || patient.email || 'Sin datos de contacto')}</span></div><div class="patient-detail"><span>Visitas</span><strong>${patient.appointmentCount}</strong></div><div class="patient-detail"><span>Alertas</span><strong>${esc(patient.allergies || 'Ninguna')}</strong></div></article>`; }
+function patientRow(patient) { return `<article class="patient-row"><div class="avatar purple">${esc(initials(patient.fullName))}</div><div class="patient-name"><strong>${esc(patient.fullName)}</strong><span>${esc(patient.phone || patient.email || 'Sin datos de contacto')}</span></div><div class="patient-detail"><span>Visitas</span><strong>${patient.appointmentCount}</strong></div><div class="patient-detail"><span>Alertas</span><strong>${esc(patient.allergies || 'Ninguna')}</strong></div><button class="edit-patient" data-edit-patient="${esc(patient.id)}">Editar</button></article>`; }
 function patientsPage() {
   document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users',true)}${nav('Tratamientos','tooth')}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="search">${icon('search')}<input id="patient-search" placeholder="Buscar paciente…"/></div><div class="header-actions"><button class="new-appointment" id="open-patient-modal">${icon('plus')} Nuevo paciente</button></div></header><div class="content patient-content"><div class="page-heading"><div><p class="eyebrow">EXPEDIENTES CLÍNICOS</p><h1>Pacientes</h1><p>${patients.length} paciente${patients.length === 1 ? '' : 's'} registrado${patients.length === 1 ? '' : 's'} en tu consultorio.</p></div></div><section class="panel patient-list"><div class="patient-list-head"><span>Paciente</span><span>Visitas</span><span>Alertas médicas</span></div><div id="patient-rows">${patients.map(patientRow).join('') || '<p class="empty">Aún no hay pacientes. Crea el primer expediente.</p>'}</div></section></div></main></div>${patientModal()}`;
-  const open = () => document.querySelector('#patient-modal').classList.add('visible');
+  const open = () => { editingPatient = null; const form = document.querySelector('.patient-modal'); form.reset(); document.querySelector('#patient-modal .eyebrow').textContent = 'NUEVO PACIENTE'; document.querySelector('#patient-modal h2').textContent = 'Crear expediente'; form.querySelector('.save-appointment').textContent = 'Guardar paciente'; document.querySelector('#patient-modal').classList.add('visible'); };
   document.querySelector('#open-patient-modal').onclick = open;
   document.querySelector('#close-patient-modal').onclick = () => document.querySelector('#patient-modal').classList.remove('visible');
   document.querySelector('#patient-modal').onclick = event => { if (event.target.id === 'patient-modal') event.currentTarget.classList.remove('visible'); };
@@ -88,7 +89,7 @@ function bindDashboard() {
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
 document.addEventListener('submit', async event => {
-  if (!event.target.matches('.modal')) return;
+  if (!event.target.matches('.modal:not(.patient-modal)')) return;
   event.preventDefault();
   const form = event.target;
   const error = document.querySelector('#appointment-error');
@@ -118,14 +119,32 @@ document.addEventListener('submit', async event => {
   button.textContent = 'Guardando…';
   try {
     const values = Object.fromEntries(new FormData(form));
-    await api('/api/patients', { method:'POST', body:JSON.stringify(values) });
-    toast('Paciente registrado correctamente');
+    await api(editingPatient ? `/api/patients/${editingPatient.id}` : '/api/patients', { method:editingPatient ? 'PATCH' : 'POST', body:JSON.stringify(values) });
+    toast(editingPatient ? 'Expediente actualizado correctamente' : 'Paciente registrado correctamente');
+    editingPatient = null;
     await loadPatients();
   } catch (err) {
     error.textContent = err.message;
     button.disabled = false;
     button.textContent = 'Guardar paciente';
   }
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-edit-patient]');
+  if (!button) return;
+  editingPatient = patients.find(patient => patient.id === button.dataset.editPatient);
+  if (!editingPatient) return;
+  const modal = document.querySelector('#patient-modal');
+  const form = modal.querySelector('.patient-modal');
+  form.fullName.value = editingPatient.fullName || '';
+  form.phone.value = editingPatient.phone || '';
+  form.email.value = editingPatient.email || '';
+  form.allergies.value = editingPatient.allergies || '';
+  form.notes.value = editingPatient.notes || '';
+  modal.querySelector('.eyebrow').textContent = 'EDITAR PACIENTE';
+  modal.querySelector('h2').textContent = 'Actualizar expediente';
+  form.querySelector('.save-appointment').textContent = 'Guardar cambios';
+  modal.classList.add('visible');
 });
 function toast(message) { const element = document.createElement('div'); element.className = 'toast'; element.textContent = message; document.body.append(element); setTimeout(() => element.remove(), 2800); }
 async function boot() { if (!token) return authPage(); try { user = (await api('/api/auth/me')).user; await loadDashboard(); } catch { localStorage.removeItem('odontia-token'); token = null; authPage(); } }
