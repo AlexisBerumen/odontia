@@ -78,7 +78,10 @@ function authPage() {
   };
 }
 
-const nav = (label, name, active = false) => `<button class="nav-item ${active ? 'active' : ''}" data-section="${label}">${icon(name)}<span>${label}</span></button>`;
+const nav = (label, name, active = false) => {
+  const displayLabel = label === 'Reportes' ? 'Bitácora' : label;
+  return `<button class="nav-item ${active ? 'active' : ''}" data-section="${label}">${icon(name)}<span>${displayLabel}</span></button>`;
+};
 const auditLabels = {
   'patient.created':'Expediente creado', 'patient.created_from_appointment':'Paciente creado al agendar', 'patient.updated':'Expediente actualizado',
   'clinical_note.created':'Evolución clínica registrada', 'treatment.created':'Tratamiento creado', 'treatment.updated':'Tratamiento actualizado',
