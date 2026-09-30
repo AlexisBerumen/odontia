@@ -89,12 +89,16 @@ const auditLabels = {
   'odontogram.created':'Pieza registrada en odontograma', 'odontogram.updated':'Pieza actualizada en odontograma',
   'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada',
 };
+const statusLabels = {
+  active:'Activo', completed:'Finalizado', pending:'Pendiente', confirmed:'Confirmada', cancelled:'Cancelada',
+  healthy:'Sano', treatment:'En tratamiento', watch:'Vigilar', missing:'Ausente',
+};
 function auditDetail(event) {
   const data = event.details || {};
   if (Array.isArray(data.fields) && data.fields.length) return `Campos modificados: ${data.fields.join(', ')}.`;
   if (event.action === 'payment.created') return `Monto registrado: ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.amount || 0))}.`;
   if (event.action === 'payment.updated') return `Monto corregido de ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.previousAmount || 0))} a ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(Number(data.newAmount || 0))}.`;
-  if (data.previousStatus || data.newStatus) return `Estado: ${data.previousStatus || 'sin registro'} → ${data.newStatus || 'sin registro'}.`;
+  if (data.previousStatus || data.newStatus) return `Estado: ${statusLabels[data.previousStatus] || data.previousStatus || 'Sin registro'} → ${statusLabels[data.newStatus] || data.newStatus || 'Sin registro'}.`;
   if (data.procedure) return 'Se añadió una evolución al expediente.';
   return 'Registro de seguridad.';
 }
