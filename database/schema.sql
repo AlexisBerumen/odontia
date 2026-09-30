@@ -80,3 +80,16 @@ create table if not exists clinical_notes (
 );
 
 create index if not exists clinical_notes_owner_patient_idx on clinical_notes (owner_id, patient_id, visit_date desc);
+
+create table if not exists treatment_payments (
+  id uuid primary key,
+  owner_id uuid not null references users(id) on delete cascade,
+  treatment_id uuid not null references treatments(id) on delete cascade,
+  amount numeric(12,2) not null check (amount > 0),
+  payment_date date not null default current_date,
+  payment_method text,
+  notes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists treatment_payments_owner_treatment_idx on treatment_payments (owner_id, treatment_id, payment_date desc);

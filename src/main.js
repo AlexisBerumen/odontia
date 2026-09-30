@@ -6,6 +6,7 @@ import './odontogram.css';
 import './tooth-icons.css';
 import './profile.css';
 import './context-nav.css';
+import './payments.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -14,6 +15,8 @@ let patients = [];
 let editingPatient = null;
 let patientProfile = null;
 let treatments = [];
+let editingTreatment = null;
+let paymentTreatment = null;
 let odontogramRecords = [];
 let odontogramPatientId = '';
 let selectedTooth = '11';
@@ -107,16 +110,20 @@ function patientProfilePage() {
   document.querySelector('#clinical-note-modal').onclick = event => { if (event.target.id === 'clinical-note-modal') event.currentTarget.classList.remove('visible'); };
 }
 async function loadPatientProfile(id) { patientProfile = await api(`/api/patients/${id}/profile`); patientProfilePage(); }
-function treatmentModal() { return `<div class="modal-backdrop" id="treatment-modal"><form class="modal treatment-modal"><button type="button" class="modal-close" id="close-treatment-modal">×</button><p class="eyebrow">NUEVO TRATAMIENTO</p><h2>Agregar al historial</h2><label>Paciente<select required name="patientId"><option value="">Selecciona un paciente</option>${patients.map(patient => `<option value="${esc(patient.id)}">${esc(patient.fullName)}</option>`).join('')}</select></label><label>Tratamiento<input required name="name" placeholder="Ej. Restauración con resina"/></label><div class="form-row"><label>Pieza dental<input name="tooth" placeholder="Ej. 16"/></label><label>Costo estimado<input name="estimatedCost" type="number" min="0" step="0.01" placeholder="$0.00"/></label></div><label>Notas<textarea name="notes" placeholder="Diagnóstico, materiales o indicaciones"></textarea></label><p class="form-error" id="treatment-error"></p><button class="save-appointment">Guardar tratamiento</button></form></div>`; }
-function treatmentCard(treatment) { const price = treatment.estimatedCost == null ? 'Sin costo registrado' : new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN' }).format(treatment.estimatedCost); const complete = treatment.status === 'completed'; return `<article class="treatment-card"><div class="treatment-card-top"><div><span class="tooth-badge">${esc(treatment.tooth || '—')}</span><span class="status ${complete ? 'confirmed' : 'pending'}">${complete ? 'Finalizado' : 'Activo'}</span></div><button class="treatment-status" data-treatment-id="${esc(treatment.id)}" data-treatment-status="${complete ? 'active' : 'completed'}">${complete ? 'Reabrir' : 'Finalizar'}</button></div><h3>${esc(treatment.name)}</h3><p class="treatment-patient">${esc(treatment.patientName)}</p><p class="treatment-notes">${esc(treatment.notes || 'Sin notas clínicas adicionales.')}</p><footer><span>${price}</span><span>${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(treatment.createdAt))}</span></footer></article>`; }
+function treatmentModal() { return `<div class="modal-backdrop" id="treatment-modal"><form class="modal treatment-modal"><button type="button" class="modal-close" id="close-treatment-modal">×</button><p class="eyebrow" id="treatment-modal-label">NUEVO TRATAMIENTO</p><h2 id="treatment-modal-title">Agregar al historial</h2><label>Paciente<select required name="patientId"><option value="">Selecciona un paciente</option>${patients.map(patient => `<option value="${esc(patient.id)}">${esc(patient.fullName)}</option>`).join('')}</select></label><label>Tratamiento<input required name="name" placeholder="Ej. Restauración con resina"/></label><div class="form-row"><label>Pieza dental<input name="tooth" placeholder="Ej. 16"/></label><label>Costo total<input name="estimatedCost" type="number" min="0" step="0.01" placeholder="$0.00"/></label></div><label>Estado<select name="status"><option value="active">Activo</option><option value="completed">Finalizado</option></select></label><label>Notas<textarea name="notes" placeholder="Diagnóstico, materiales o indicaciones"></textarea></label><p class="form-error" id="treatment-error"></p><button class="save-appointment">Guardar tratamiento</button></form></div>`; }
+function paymentModal() { return `<div class="modal-backdrop" id="payment-modal"><form class="modal payment-modal"><button type="button" class="modal-close" id="close-payment-modal">×</button><p class="eyebrow">REGISTRAR ABONO</p><h2 id="payment-title">Abono al tratamiento</h2><label>Monto<input required name="amount" type="number" min="0.01" step="0.01" placeholder="$0.00"/></label><div class="form-row"><label>Fecha<input name="paymentDate" type="date" value="${isoToday}"/></label><label>Método<select name="paymentMethod"><option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option><option>Otro</option></select></label></div><label>Nota<input name="notes" placeholder="Ej. anticipo"/></label><p class="form-error" id="payment-error"></p><button class="save-appointment">Registrar abono</button></form></div>`; }
+function treatmentCard(treatment) { const total = Number(treatment.estimatedCost || 0); const paid = Number(treatment.paidAmount || 0); const balance = Math.max(total - paid, 0); const money = value => new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN' }).format(value); const complete = treatment.status === 'completed'; return `<article class="treatment-card"><div class="treatment-card-top"><div><span class="tooth-badge">${esc(treatment.tooth || '—')}</span><span class="status ${complete ? 'confirmed' : 'pending'}">${complete ? 'Finalizado' : 'Activo'}</span></div><button class="treatment-status" data-treatment-id="${esc(treatment.id)}" data-treatment-status="${complete ? 'active' : 'completed'}">${complete ? 'Reabrir' : 'Finalizar'}</button></div><h3>${esc(treatment.name)}</h3><p class="treatment-patient">${esc(treatment.patientName)}</p><p class="treatment-notes">${esc(treatment.notes || 'Sin notas clínicas adicionales.')}</p><div class="payment-summary"><span>Total <b>${total ? money(total) : '—'}</b></span><span>Abonado <b>${money(paid)}</b></span><strong class="${balance === 0 && total ? 'paid' : ''}">${total ? (balance === 0 ? 'Liquidado' : `Saldo ${money(balance)}`) : 'Sin costo'}</strong></div><footer><button class="card-action" data-edit-treatment="${esc(treatment.id)}">Editar</button><button class="card-action" data-payment-treatment="${esc(treatment.id)}" ${!total || balance === 0 ? 'disabled' : ''}>Abono</button></footer></article>`; }
 function treatmentsPage() {
   const active = treatments.filter(treatment => treatment.status === 'active').length;
   document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth',true)}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="agenda-title-small">Historial clínico</div><div class="header-actions"><button class="new-appointment" id="open-treatment-modal">${icon('plus')} Nuevo tratamiento</button></div></header><div class="content treatment-content"><div class="page-heading"><div><p class="eyebrow">HISTORIAL CLÍNICO</p><h1>Tratamientos</h1><p>${active} tratamiento${active === 1 ? '' : 's'} activo${active === 1 ? '' : 's'}.</p></div></div><div class="treatment-grid">${treatments.map(treatmentCard).join('') || '<section class="panel empty-treatment"><span>🦷</span><h2>Aún no hay tratamientos</h2><p>Registra el diagnóstico y plan de cada paciente para construir su historial.</p></section>'}</div></div></main></div>${treatmentModal()}`;
+  document.querySelector('#app').insertAdjacentHTML('beforeend', paymentModal());
   document.querySelector('#open-treatment-modal').insertAdjacentHTML('beforebegin', '<button class="odontogram-launch" id="open-odontogram">Odontograma</button>');
   document.querySelector('#open-odontogram').onclick = loadOdontogram;
-  document.querySelector('#open-treatment-modal').onclick = () => { if (!patients.length) return toast('Primero registra un paciente.'); document.querySelector('#treatment-modal').classList.add('visible'); };
+  document.querySelector('#open-treatment-modal').onclick = () => { if (!patients.length) return toast('Primero registra un paciente.'); editingTreatment = null; const form = document.querySelector('.treatment-modal'); form.reset(); document.querySelector('#treatment-modal-label').textContent = 'NUEVO TRATAMIENTO'; document.querySelector('#treatment-modal-title').textContent = 'Agregar al historial'; form.querySelector('.save-appointment').textContent = 'Guardar tratamiento'; document.querySelector('#treatment-modal').classList.add('visible'); };
   document.querySelector('#close-treatment-modal').onclick = () => document.querySelector('#treatment-modal').classList.remove('visible');
   document.querySelector('#treatment-modal').onclick = event => { if (event.target.id === 'treatment-modal') event.currentTarget.classList.remove('visible'); };
+  document.querySelector('#close-payment-modal').onclick = () => document.querySelector('#payment-modal').classList.remove('visible');
+  document.querySelector('#payment-modal').onclick = event => { if (event.target.id === 'payment-modal') event.currentTarget.classList.remove('visible'); };
   document.querySelector('#logout').onclick = () => { localStorage.removeItem('odontia-token'); token = null; authPage(); };
   document.querySelector('.mobile-menu').onclick = () => document.querySelector('.sidebar').classList.toggle('open');
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Pacientes') loadPatients(); else if (button.dataset.section !== 'Tratamientos') toast(`${button.dataset.section} estará disponible próximamente.`); });
@@ -166,7 +173,7 @@ function bindDashboard() {
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
 document.addEventListener('submit', async event => {
-  if (!event.target.matches('.modal:not(.patient-modal):not(.treatment-modal):not(.clinical-note-modal)')) return;
+  if (!event.target.matches('.modal:not(.patient-modal):not(.treatment-modal):not(.clinical-note-modal):not(.payment-modal)')) return;
   event.preventDefault();
   const form = event.target;
   const isEditing = event.target.matches('.agenda-modal') && editingAppointment;
@@ -237,13 +244,34 @@ document.addEventListener('submit', async event => {
   button.disabled = true;
   button.textContent = 'Guardando…';
   try {
-    await api('/api/treatments', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
-    toast('Tratamiento agregado al historial');
+    await api(editingTreatment ? `/api/treatments/${editingTreatment.id}` : '/api/treatments', { method:editingTreatment ? 'PATCH' : 'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+    toast(editingTreatment ? 'Tratamiento actualizado' : 'Tratamiento agregado al historial');
+    editingTreatment = null;
     await loadTreatments();
   } catch (err) {
     error.textContent = err.message;
     button.disabled = false;
     button.textContent = 'Guardar tratamiento';
+  }
+});
+document.addEventListener('submit', async event => {
+  if (!event.target.matches('.payment-modal')) return;
+  event.preventDefault();
+  const form = event.target;
+  const error = document.querySelector('#payment-error');
+  const button = form.querySelector('.save-appointment');
+  error.textContent = '';
+  button.disabled = true;
+  button.textContent = 'Registrando…';
+  try {
+    await api(`/api/treatments/${paymentTreatment.id}/payments`, { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+    toast('Abono registrado correctamente');
+    paymentTreatment = null;
+    await loadTreatments();
+  } catch (err) {
+    error.textContent = err.message;
+    button.disabled = false;
+    button.textContent = 'Registrar abono';
   }
 });
 document.addEventListener('submit', async event => {
@@ -301,6 +329,36 @@ document.addEventListener('click', async event => {
     toast(button.dataset.treatmentStatus === 'completed' ? 'Tratamiento marcado como finalizado' : 'Tratamiento reabierto');
     await loadTreatments();
   } catch (err) { toast(err.message); button.disabled = false; }
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-edit-treatment]');
+  if (!button) return;
+  editingTreatment = treatments.find(treatment => treatment.id === button.dataset.editTreatment);
+  if (!editingTreatment) return;
+  const modal = document.querySelector('#treatment-modal');
+  const form = modal.querySelector('.treatment-modal');
+  form.patientId.value = editingTreatment.patientId;
+  form.name.value = editingTreatment.name;
+  form.tooth.value = editingTreatment.tooth || '';
+  form.estimatedCost.value = editingTreatment.estimatedCost || '';
+  form.status.value = editingTreatment.status;
+  form.notes.value = editingTreatment.notes || '';
+  document.querySelector('#treatment-modal-label').textContent = 'EDITAR TRATAMIENTO';
+  document.querySelector('#treatment-modal-title').textContent = 'Actualizar tratamiento';
+  form.querySelector('.save-appointment').textContent = 'Guardar cambios';
+  modal.classList.add('visible');
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-payment-treatment]');
+  if (!button || button.disabled) return;
+  paymentTreatment = treatments.find(treatment => treatment.id === button.dataset.paymentTreatment);
+  if (!paymentTreatment) return;
+  const total = Number(paymentTreatment.estimatedCost || 0); const paid = Number(paymentTreatment.paidAmount || 0); const balance = total - paid;
+  const modal = document.querySelector('#payment-modal');
+  modal.querySelector('.payment-modal').reset();
+  modal.querySelector('[name="paymentDate"]').value = isoToday;
+  modal.querySelector('#payment-title').textContent = `${paymentTreatment.name} · saldo ${new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(balance)}`;
+  modal.classList.add('visible');
 });
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-edit-appointment]');
