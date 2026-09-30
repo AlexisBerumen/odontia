@@ -33,6 +33,10 @@ async function migrate() {
       full_name text not null, phone text, email text, birth_date date, allergies text, notes text,
       created_at timestamptz not null default now()
     );
+    alter table patients add column if not exists medical_history text;
+    alter table patients add column if not exists medications text;
+    alter table patients add column if not exists emergency_contact text;
+    alter table patients add column if not exists reason_for_visit text;
     create index if not exists patients_owner_name_idx on patients (owner_id, full_name);
     create table if not exists appointments (
       id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
@@ -58,6 +62,13 @@ async function migrate() {
       notes text, updated_at timestamptz not null default now(),
       unique (owner_id, patient_id, tooth_number)
     );
+    create table if not exists clinical_notes (
+      id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
+      patient_id uuid not null references patients(id) on delete cascade,
+      visit_date date not null default current_date, diagnosis text, procedure_done text not null,
+      indications text, next_visit date, created_at timestamptz not null default now()
+    );
+    create index if not exists clinical_notes_owner_patient_idx on clinical_notes (owner_id, patient_id, visit_date desc);
   `);
 }
 
@@ -151,13 +162,13 @@ app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/patients', requireUser, asyncRoute(async (req, res) => {
-  const { rows } = await pool.query(`select p.id, p.full_name, p.phone, p.email, p.allergies, p.notes, p.created_at,
+  const { rows } = await pool.query(`select p.id, p.full_name, p.phone, p.email, p.birth_date, p.allergies, p.notes, p.medical_history, p.medications, p.emergency_contact, p.reason_for_visit, p.created_at,
       count(a.id)::integer as appointment_count, max(a.starts_at) as last_appointment
     from patients p left join appointments a on a.patient_id = p.id and a.owner_id = p.owner_id
     where p.owner_id = $1 group by p.id order by p.full_name asc`, [req.user.sub]);
   res.json({ patients: rows.map(row => ({
-    id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, allergies: row.allergies,
-    notes: row.notes, appointmentCount: row.appointment_count, lastAppointment: row.last_appointment,
+    id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, birthDate: row.birth_date, allergies: row.allergies, notes: row.notes,
+    medicalHistory: row.medical_history, medications: row.medications, emergencyContact: row.emergency_contact, reasonForVisit: row.reason_for_visit, appointmentCount: row.appointment_count, lastAppointment: row.last_appointment,
   })) });
 }));
 
@@ -167,9 +178,15 @@ app.post('/api/patients', requireUser, asyncRoute(async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const allergies = String(req.body.allergies || '').trim();
   const notes = String(req.body.notes || '').trim();
+  const birthDate = String(req.body.birthDate || '').trim();
+  const medicalHistory = String(req.body.medicalHistory || '').trim();
+  const medications = String(req.body.medications || '').trim();
+  const emergencyContact = String(req.body.emergencyContact || '').trim();
+  const reasonForVisit = String(req.body.reasonForVisit || '').trim();
   if (fullName.length < 2 || (email && !emailPattern.test(email))) return res.status(400).json({ error: 'Agrega un nombre y, si aplica, un correo válido.' });
   const id = crypto.randomUUID();
-  await pool.query('insert into patients (id, owner_id, full_name, phone, email, allergies, notes) values ($1, $2, $3, $4, $5, $6, $7)', [id, req.user.sub, fullName, phone || null, email || null, allergies || null, notes || null]);
+  await pool.query(`insert into patients (id, owner_id, full_name, phone, email, birth_date, allergies, notes, medical_history, medications, emergency_contact, reason_for_visit)
+    values ($1, $2, $3, $4, $5, nullif($6, '')::date, $7, $8, $9, $10, $11, $12)`, [id, req.user.sub, fullName, phone || null, email || null, birthDate, allergies || null, notes || null, medicalHistory || null, medications || null, emergencyContact || null, reasonForVisit || null]);
   res.status(201).json({ id });
 }));
 
@@ -179,11 +196,42 @@ app.patch('/api/patients/:id', requireUser, asyncRoute(async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const allergies = String(req.body.allergies || '').trim();
   const notes = String(req.body.notes || '').trim();
+  const birthDate = String(req.body.birthDate || '').trim();
+  const medicalHistory = String(req.body.medicalHistory || '').trim();
+  const medications = String(req.body.medications || '').trim();
+  const emergencyContact = String(req.body.emergencyContact || '').trim();
+  const reasonForVisit = String(req.body.reasonForVisit || '').trim();
   if (fullName.length < 2 || (email && !emailPattern.test(email))) return res.status(400).json({ error: 'Agrega un nombre y, si aplica, un correo válido.' });
-  const { rowCount } = await pool.query(`update patients set full_name = $1, phone = $2, email = $3, allergies = $4, notes = $5
-    where id = $6 and owner_id = $7`, [fullName, phone || null, email || null, allergies || null, notes || null, req.params.id, req.user.sub]);
+  const { rowCount } = await pool.query(`update patients set full_name = $1, phone = $2, email = $3, birth_date = nullif($4, '')::date, allergies = $5, notes = $6,
+    medical_history = $7, medications = $8, emergency_contact = $9, reason_for_visit = $10 where id = $11 and owner_id = $12`, [fullName, phone || null, email || null, birthDate, allergies || null, notes || null, medicalHistory || null, medications || null, emergencyContact || null, reasonForVisit || null, req.params.id, req.user.sub]);
   if (!rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
   res.json({ ok: true });
+}));
+
+app.get('/api/patients/:id/profile', requireUser, asyncRoute(async (req, res) => {
+  const patient = await pool.query(`select id, full_name, phone, email, birth_date, allergies, notes, medical_history, medications, emergency_contact, reason_for_visit, created_at
+    from patients where id = $1 and owner_id = $2`, [req.params.id, req.user.sub]);
+  if (!patient.rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  const [appointments, treatments, notes] = await Promise.all([
+    pool.query(`select starts_at, appointment_type, status from appointments where owner_id = $1 and patient_id = $2 order by starts_at desc limit 30`, [req.user.sub, req.params.id]),
+    pool.query(`select treatment_name, tooth, status, estimated_cost, notes, created_at from treatments where owner_id = $1 and patient_id = $2 order by created_at desc`, [req.user.sub, req.params.id]),
+    pool.query(`select id, visit_date, diagnosis, procedure_done, indications, next_visit from clinical_notes where owner_id = $1 and patient_id = $2 order by visit_date desc, created_at desc`, [req.user.sub, req.params.id]),
+  ]);
+  res.json({ patient: patient.rows[0], appointments: appointments.rows, treatments: treatments.rows, clinicalNotes: notes.rows });
+}));
+
+app.post('/api/patients/:id/clinical-notes', requireUser, asyncRoute(async (req, res) => {
+  const procedureDone = String(req.body.procedureDone || '').trim();
+  const diagnosis = String(req.body.diagnosis || '').trim();
+  const indications = String(req.body.indications || '').trim();
+  const visitDate = String(req.body.visitDate || '').trim();
+  const nextVisit = String(req.body.nextVisit || '').trim();
+  if (procedureDone.length < 2 || (visitDate && !/^\d{4}-\d{2}-\d{2}$/.test(visitDate)) || (nextVisit && !/^\d{4}-\d{2}-\d{2}$/.test(nextVisit))) return res.status(400).json({ error: 'Registra el procedimiento y revisa las fechas.' });
+  const patient = await pool.query('select 1 from patients where id = $1 and owner_id = $2', [req.params.id, req.user.sub]);
+  if (!patient.rowCount) return res.status(404).json({ error: 'Paciente no encontrado.' });
+  await pool.query(`insert into clinical_notes (id, owner_id, patient_id, visit_date, diagnosis, procedure_done, indications, next_visit)
+    values ($1, $2, $3, coalesce(nullif($4, '')::date, current_date), $5, $6, $7, nullif($8, '')::date)`, [crypto.randomUUID(), req.user.sub, req.params.id, visitDate, diagnosis || null, procedureDone, indications || null, nextVisit]);
+  res.status(201).json({ ok: true });
 }));
 
 app.get('/api/treatments', requireUser, asyncRoute(async (req, res) => {

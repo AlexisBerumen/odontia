@@ -18,6 +18,10 @@ create table if not exists patients (
   birth_date date,
   allergies text,
   notes text,
+  medical_history text,
+  medications text,
+  emergency_contact text,
+  reason_for_visit text,
   created_at timestamptz not null default now()
 );
 
@@ -62,3 +66,17 @@ create table if not exists tooth_records (
   updated_at timestamptz not null default now(),
   unique (owner_id, patient_id, tooth_number)
 );
+
+create table if not exists clinical_notes (
+  id uuid primary key,
+  owner_id uuid not null references users(id) on delete cascade,
+  patient_id uuid not null references patients(id) on delete cascade,
+  visit_date date not null default current_date,
+  diagnosis text,
+  procedure_done text not null,
+  indications text,
+  next_visit date,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists clinical_notes_owner_patient_idx on clinical_notes (owner_id, patient_id, visit_date desc);

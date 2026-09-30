@@ -4,12 +4,14 @@ import './agenda.css';
 import './treatments.css';
 import './odontogram.css';
 import './tooth-icons.css';
+import './profile.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
 let appointments = [];
 let patients = [];
 let editingPatient = null;
+let patientProfile = null;
 let treatments = [];
 let odontogramRecords = [];
 let odontogramPatientId = '';
@@ -79,8 +81,8 @@ function dashboard() {
   document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid',true)}${nav('Agenda','calendar')}${nav('Pacientes','users')}${nav('Tratamientos','tooth')}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="search">${icon('search')}<input id="search" placeholder="Buscar una cita de hoy…"/></div><div class="header-actions"><button class="icon-button notification" aria-label="Notificaciones">${icon('bell')}<i></i></button><button class="new-appointment" id="open-modal">${icon('plus')} Nueva cita</button></div></header><div class="content"><div class="welcome"><div><p class="eyebrow">${esc(dateText.toUpperCase())}</p><h1>Buenos días, ${firstName} <span>👋</span></h1><p>Esto es lo que tienes programado para hoy.</p></div><div class="mini-calendar"><b>AGENDA EN LÍNEA</b><div class="calendar-days"><span>✓</span><span>✓</span><span>✓</span><span>✓</span><span>✓</span><span>✓</span><span>✓</span><strong class="today">${today.getDate()}</strong></div></div></div><section class="metrics"><article><div class="metric-icon teal">${icon('calendar')}</div><p>Citas para hoy</p><strong>${appointments.length}</strong><span class="up">Agenda sincronizada</span></article><article><div class="metric-icon violet">${icon('users')}</div><p>Pacientes en agenda</p><strong>${new Set(appointments.map(item => item.patient)).size}</strong><span>En tu cuenta</span></article><article><div class="metric-icon amber">${icon('tooth')}</div><p>Tratamientos activos</p><strong>—</strong><span>Próximamente</span></article><article><div class="metric-icon blue">${icon('chart')}</div><p>Ingresos del mes</p><strong>—</strong><span>Próximamente</span></article></section><div class="dashboard-grid">${schedule()}<aside class="right-column"><section class="panel next-patient"><div class="section-heading"><div><h2>Próximo paciente</h2><p>${first ? `A las ${esc(first.time)}` : 'Agenda tu primera cita'}</p></div></div>${first ? `<div class="patient-feature"><div class="avatar aqua large">${esc(first.initials)}</div><div><h3>${esc(first.patient)}</h3><p>${esc(first.type)}</p></div></div>` : '<p class="empty">Tu agenda está lista para comenzar.</p>'}<button class="outline-button" id="open-modal-2">Agregar una cita ${icon('chevron')}</button></section><section class="panel reminder"><div class="reminder-top"><span class="whatsapp">${icon('message')}</span></div><h3>Recordatorios inteligentes</h3><p>Podrás confirmar citas automáticamente cuando conectemos WhatsApp.</p><button id="reminder">Próximamente</button></section></aside></div></div></main></div>${modal()}`;
   bindDashboard();
 }
-function patientModal() { return `<div class="modal-backdrop" id="patient-modal"><form class="modal patient-modal"><button type="button" class="modal-close" id="close-patient-modal">×</button><p class="eyebrow">NUEVO PACIENTE</p><h2>Crear expediente</h2><label>Nombre completo<input required name="fullName" placeholder="Nombre completo"/></label><div class="form-row"><label>Teléfono<input name="phone" type="tel" placeholder="55 1234 5678"/></label><label>Correo<input name="email" type="email" placeholder="correo@ejemplo.com"/></label></div><label>Alergias o consideraciones<textarea name="allergies" placeholder="Ej. alergia a penicilina"></textarea></label><label>Notas clínicas iniciales<textarea name="notes" placeholder="Observaciones relevantes"></textarea></label><p class="form-error" id="patient-error"></p><button class="save-appointment">Guardar paciente</button></form></div>`; }
-function patientRow(patient) { return `<article class="patient-row"><div class="avatar purple">${esc(initials(patient.fullName))}</div><div class="patient-name"><strong>${esc(patient.fullName)}</strong><span>${esc(patient.phone || patient.email || 'Sin datos de contacto')}</span></div><div class="patient-detail"><span>Visitas</span><strong>${patient.appointmentCount}</strong></div><div class="patient-detail"><span>Alertas</span><strong>${esc(patient.allergies || 'Ninguna')}</strong></div><button class="edit-patient" data-edit-patient="${esc(patient.id)}">Editar</button></article>`; }
+function patientModal() { return `<div class="modal-backdrop" id="patient-modal"><form class="modal patient-modal"><button type="button" class="modal-close" id="close-patient-modal">×</button><p class="eyebrow">NUEVO PACIENTE</p><h2>Crear expediente</h2><label>Nombre completo<input required name="fullName" placeholder="Nombre completo"/></label><div class="form-row"><label>Teléfono<input name="phone" type="tel" placeholder="55 1234 5678"/></label><label>Fecha de nacimiento<input name="birthDate" type="date"/></label></div><label>Correo<input name="email" type="email" placeholder="correo@ejemplo.com"/></label><label>Motivo de consulta<input name="reasonForVisit" placeholder="Ej. dolor, revisión, estética"/></label><label>Alergias o consideraciones<textarea name="allergies" placeholder="Ej. alergia a penicilina"></textarea></label><label>Antecedentes médicos<textarea name="medicalHistory" placeholder="Enfermedades, cirugías o condiciones relevantes"></textarea></label><label>Medicamentos actuales<textarea name="medications" placeholder="Medicamentos y dosis, si aplica"></textarea></label><label>Contacto de emergencia<input name="emergencyContact" placeholder="Nombre y teléfono"/></label><label>Notas clínicas iniciales<textarea name="notes" placeholder="Observaciones relevantes"></textarea></label><p class="form-error" id="patient-error"></p><button class="save-appointment">Guardar paciente</button></form></div>`; }
+function patientRow(patient) { return `<article class="patient-row"><div class="avatar purple">${esc(initials(patient.fullName))}</div><div class="patient-name"><strong>${esc(patient.fullName)}</strong><span>${esc(patient.phone || patient.email || 'Sin datos de contacto')}</span></div><div class="patient-detail"><span>Visitas</span><strong>${patient.appointmentCount}</strong></div><div class="patient-detail"><span>Alertas</span><strong>${esc(patient.allergies || 'Ninguna')}</strong></div><button class="edit-patient" data-profile-patient="${esc(patient.id)}">Expediente</button><button class="edit-patient" data-edit-patient="${esc(patient.id)}">Editar</button></article>`; }
 function patientsPage() {
   document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><nav>${nav('Inicio','grid')}${nav('Agenda','calendar')}${nav('Pacientes','users',true)}${nav('Tratamientos','tooth')}${nav('Reportes','chart')}</nav><div class="sidebar-bottom">${nav('Configuración','settings')}<div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div><button id="logout" title="Cerrar sesión">↗</button></div></div></aside><main><header class="topbar"><button class="mobile-menu" aria-label="Abrir menú">☰</button><div class="search">${icon('search')}<input id="patient-search" placeholder="Buscar paciente…"/></div><div class="header-actions"><button class="new-appointment" id="open-patient-modal">${icon('plus')} Nuevo paciente</button></div></header><div class="content patient-content"><div class="page-heading"><div><p class="eyebrow">EXPEDIENTES CLÍNICOS</p><h1>Pacientes</h1><p>${patients.length} paciente${patients.length === 1 ? '' : 's'} registrado${patients.length === 1 ? '' : 's'} en tu consultorio.</p></div></div><section class="panel patient-list"><div class="patient-list-head"><span>Paciente</span><span>Visitas</span><span>Alertas médicas</span></div><div id="patient-rows">${patients.map(patientRow).join('') || '<p class="empty">Aún no hay pacientes. Crea el primer expediente.</p>'}</div></section></div></main></div>${patientModal()}`;
   const open = () => { editingPatient = null; const form = document.querySelector('.patient-modal'); form.reset(); document.querySelector('#patient-modal .eyebrow').textContent = 'NUEVO PACIENTE'; document.querySelector('#patient-modal h2').textContent = 'Crear expediente'; form.querySelector('.save-appointment').textContent = 'Guardar paciente'; document.querySelector('#patient-modal').classList.add('visible'); };
@@ -93,6 +95,17 @@ function patientsPage() {
   document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => { if (button.dataset.section === 'Inicio') loadDashboard(); else if (button.dataset.section === 'Agenda') loadAgenda(); else if (button.dataset.section === 'Tratamientos') loadTreatments(); else if (button.dataset.section !== 'Pacientes') toast(`${button.dataset.section} estará disponible próximamente.`); });
 }
 async function loadPatients() { patients = (await api('/api/patients')).patients; patientsPage(); }
+function clinicalNoteModal() { return `<div class="modal-backdrop" id="clinical-note-modal"><form class="modal clinical-note-modal"><button type="button" class="modal-close" id="close-clinical-note-modal">×</button><p class="eyebrow">NUEVA EVOLUCIÓN</p><h2>Registrar atención</h2><div class="form-row"><label>Fecha<input type="date" name="visitDate" value="${isoToday}"/></label><label>Próxima cita<input type="date" name="nextVisit"/></label></div><label>Diagnóstico<textarea name="diagnosis" placeholder="Hallazgos y diagnóstico clínico"></textarea></label><label>Procedimiento realizado<textarea required name="procedureDone" placeholder="Tratamiento o procedimiento realizado"></textarea></label><label>Indicaciones<textarea name="indications" placeholder="Medicamentos, cuidados y recomendaciones"></textarea></label><p class="form-error" id="clinical-note-error"></p><button class="save-appointment">Guardar evolución</button></form></div>`; }
+function patientProfilePage() {
+  const data = patientProfile; const patient = data.patient;
+  const text = value => esc(value || 'Sin registro');
+  document.querySelector('#app').innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand"><span class="brand-mark">O</span><span>odontia</span></a><div class="sidebar-bottom"><button class="nav-item" id="back-patients">${icon('chevron')}<span>Volver a pacientes</span></button><div class="doctor"><div class="avatar doctor-avatar">${esc(initials(user.fullName))}</div><div><strong>${esc(user.fullName)}</strong><span>${esc(user.clinicName || 'Odontóloga')}</span></div></div></div></aside><main><header class="topbar"><div class="agenda-title-small">Expediente clínico</div><div class="header-actions"><button class="new-appointment" id="open-clinical-note">${icon('plus')} Registrar atención</button></div></header><div class="content profile-content"><div class="profile-hero"><div class="avatar purple profile-avatar">${esc(initials(patient.full_name))}</div><div><p class="eyebrow">EXPEDIENTE CLÍNICO</p><h1>${esc(patient.full_name)}</h1><p>${text(patient.phone)} · ${text(patient.email)}</p></div><div class="profile-stats"><span>${data.appointments.length} citas</span><span>${data.treatments.length} tratamientos</span></div></div><div class="profile-grid"><section class="panel medical-summary"><h2>Historia médica</h2><dl><div><dt>Motivo de consulta</dt><dd>${text(patient.reason_for_visit)}</dd></div><div><dt>Alergias</dt><dd class="alert-text">${text(patient.allergies)}</dd></div><div><dt>Antecedentes</dt><dd>${text(patient.medical_history)}</dd></div><div><dt>Medicamentos</dt><dd>${text(patient.medications)}</dd></div><div><dt>Contacto de emergencia</dt><dd>${text(patient.emergency_contact)}</dd></div></dl></section><section class="panel clinical-timeline"><div class="section-heading"><div><h2>Evolución clínica</h2><p>Atenciones registradas</p></div></div>${data.clinicalNotes.map(note => `<article class="timeline-note"><time>${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(note.visit_date))}</time><div><strong>${esc(note.procedure_done)}</strong><p><b>Dx:</b> ${text(note.diagnosis)}</p><p>${text(note.indications)}</p>${note.next_visit ? `<small>Próxima revisión: ${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(note.next_visit))}</small>` : ''}</div></article>`).join('') || '<p class="empty">Aún no hay evoluciones registradas.</p>'}</section></div><div class="profile-grid lower"><section class="panel"><h2>Plan de tratamiento</h2>${data.treatments.map(treatment => `<div class="profile-treatment"><strong>${esc(treatment.treatment_name)}</strong><span>${esc(treatment.tooth || 'Sin pieza')} · ${treatment.status === 'completed' ? 'Finalizado' : 'Activo'}</span></div>`).join('') || '<p class="empty">No hay tratamientos registrados.</p>'}</section><section class="panel"><h2>Últimas citas</h2>${data.appointments.slice(0,5).map(appointment => `<div class="profile-treatment"><strong>${esc(appointment.appointment_type)}</strong><span>${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(appointment.starts_at))}</span></div>`).join('') || '<p class="empty">No hay citas registradas.</p>'}</section></div></div></main></div>${clinicalNoteModal()}`;
+  document.querySelector('#back-patients').onclick = loadPatients;
+  document.querySelector('#open-clinical-note').onclick = () => document.querySelector('#clinical-note-modal').classList.add('visible');
+  document.querySelector('#close-clinical-note-modal').onclick = () => document.querySelector('#clinical-note-modal').classList.remove('visible');
+  document.querySelector('#clinical-note-modal').onclick = event => { if (event.target.id === 'clinical-note-modal') event.currentTarget.classList.remove('visible'); };
+}
+async function loadPatientProfile(id) { patientProfile = await api(`/api/patients/${id}/profile`); patientProfilePage(); }
 function treatmentModal() { return `<div class="modal-backdrop" id="treatment-modal"><form class="modal treatment-modal"><button type="button" class="modal-close" id="close-treatment-modal">×</button><p class="eyebrow">NUEVO TRATAMIENTO</p><h2>Agregar al historial</h2><label>Paciente<select required name="patientId"><option value="">Selecciona un paciente</option>${patients.map(patient => `<option value="${esc(patient.id)}">${esc(patient.fullName)}</option>`).join('')}</select></label><label>Tratamiento<input required name="name" placeholder="Ej. Restauración con resina"/></label><div class="form-row"><label>Pieza dental<input name="tooth" placeholder="Ej. 16"/></label><label>Costo estimado<input name="estimatedCost" type="number" min="0" step="0.01" placeholder="$0.00"/></label></div><label>Notas<textarea name="notes" placeholder="Diagnóstico, materiales o indicaciones"></textarea></label><p class="form-error" id="treatment-error"></p><button class="save-appointment">Guardar tratamiento</button></form></div>`; }
 function treatmentCard(treatment) { const price = treatment.estimatedCost == null ? 'Sin costo registrado' : new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN' }).format(treatment.estimatedCost); const complete = treatment.status === 'completed'; return `<article class="treatment-card"><div class="treatment-card-top"><div><span class="tooth-badge">${esc(treatment.tooth || '—')}</span><span class="status ${complete ? 'confirmed' : 'pending'}">${complete ? 'Finalizado' : 'Activo'}</span></div><button class="treatment-status" data-treatment-id="${esc(treatment.id)}" data-treatment-status="${complete ? 'active' : 'completed'}">${complete ? 'Reabrir' : 'Finalizar'}</button></div><h3>${esc(treatment.name)}</h3><p class="treatment-patient">${esc(treatment.patientName)}</p><p class="treatment-notes">${esc(treatment.notes || 'Sin notas clínicas adicionales.')}</p><footer><span>${price}</span><span>${new Intl.DateTimeFormat('es-MX',{day:'numeric',month:'short',year:'numeric'}).format(new Date(treatment.createdAt))}</span></footer></article>`; }
 function treatmentsPage() {
@@ -150,7 +163,7 @@ function bindDashboard() {
 }
 async function loadDashboard() { appointments = (await api('/api/appointments')).appointments; dashboard(); }
 document.addEventListener('submit', async event => {
-  if (!event.target.matches('.modal:not(.patient-modal):not(.treatment-modal)')) return;
+  if (!event.target.matches('.modal:not(.patient-modal):not(.treatment-modal):not(.clinical-note-modal)')) return;
   event.preventDefault();
   const form = event.target;
   const isEditing = event.target.matches('.agenda-modal') && editingAppointment;
@@ -190,6 +203,25 @@ document.addEventListener('submit', async event => {
     error.textContent = err.message;
     button.disabled = false;
     button.textContent = 'Guardar paciente';
+  }
+});
+document.addEventListener('submit', async event => {
+  if (!event.target.matches('.clinical-note-modal')) return;
+  event.preventDefault();
+  const form = event.target;
+  const error = document.querySelector('#clinical-note-error');
+  const button = form.querySelector('.save-appointment');
+  error.textContent = '';
+  button.disabled = true;
+  button.textContent = 'Guardando…';
+  try {
+    await api(`/api/patients/${patientProfile.patient.id}/clinical-notes`, { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+    toast('Evolución clínica registrada');
+    await loadPatientProfile(patientProfile.patient.id);
+  } catch (err) {
+    error.textContent = err.message;
+    button.disabled = false;
+    button.textContent = 'Guardar evolución';
   }
 });
 document.addEventListener('submit', async event => {
@@ -241,12 +273,21 @@ document.addEventListener('click', event => {
   form.fullName.value = editingPatient.fullName || '';
   form.phone.value = editingPatient.phone || '';
   form.email.value = editingPatient.email || '';
+  form.birthDate.value = editingPatient.birthDate || '';
   form.allergies.value = editingPatient.allergies || '';
+  form.medicalHistory.value = editingPatient.medicalHistory || '';
+  form.medications.value = editingPatient.medications || '';
+  form.emergencyContact.value = editingPatient.emergencyContact || '';
+  form.reasonForVisit.value = editingPatient.reasonForVisit || '';
   form.notes.value = editingPatient.notes || '';
   modal.querySelector('.eyebrow').textContent = 'EDITAR PACIENTE';
   modal.querySelector('h2').textContent = 'Actualizar expediente';
   form.querySelector('.save-appointment').textContent = 'Guardar cambios';
   modal.classList.add('visible');
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-profile-patient]');
+  if (button) loadPatientProfile(button.dataset.profilePatient);
 });
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-treatment-id]');
