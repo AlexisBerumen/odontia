@@ -10,6 +10,7 @@ import './payments.css';
 import './payment-history.css';
 import './audit.css';
 import './team.css';
+import './mobile.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;

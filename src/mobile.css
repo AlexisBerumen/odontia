@@ -1,0 +1,81 @@
+/* Ajustes finales para teléfonos: el contenido aprovecha todo el ancho y conserva
+   áreas táctiles cómodas sin alterar la interfaz de escritorio. */
+@media (max-width: 700px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+  main { margin-left: 0; width: 100%; min-width: 0; }
+  .app-shell { display: block; }
+  .sidebar { width: min(82vw, 290px); z-index: 30; box-shadow: 12px 0 30px #082f3033; }
+  .sidebar.open { translate: 0; }
+  .sidebar nav { margin-top: 28px; }
+  .nav-item { min-height: 48px; font-size: 15px; }
+  .topbar { position: sticky; top: 0; z-index: 10; padding: 0 15px; }
+  .topbar .agenda-title-small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .search { min-width: 0; }
+  .search input { min-width: 0; }
+  .content, .agenda-content, .patient-content, .treatment-content, .odontogram-content, .profile-content { padding: 22px 15px 38px; }
+  .page-heading h1, .welcome h1 { font-size: 27px; }
+  .page-heading > div > p:last-child { line-height: 1.45; }
+  .metrics { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .metrics article { min-width: 0; }
+  .metrics p { font-size: 11px; }
+  .panel { border-radius: 9px; }
+  .new-appointment, .outline-button, .save-appointment { min-height: 42px; }
+  .modal-backdrop { align-items: flex-start; overflow-y: auto; padding: 0; }
+  .modal { width: 100%; min-height: 100%; max-height: none; border-radius: 0; padding: 28px 20px 34px; }
+  .modal h2 { font-size: 22px; padding-right: 25px; }
+  .modal label { font-size: 13px; }
+  .modal input, .modal select, .modal textarea { font-size: 16px; }
+  .form-row { gap: 0; }
+  .toast { width: calc(100% - 30px); text-align:center; bottom:15px; }
+
+  .patient-row { grid-template-columns: 39px minmax(0, 1fr); gap: 10px; }
+  .patient-row .patient-name { min-width: 0; }
+  .patient-row .patient-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .patient-row .edit-patient { grid-column: 1 / -1; min-height: 38px; border: 1px solid #cfe1e1; border-radius: 7px; background: #f7fbfb; font-size: 12px; }
+  .patient-row .edit-patient + .edit-patient { margin-top: -6px; }
+  .patient-list { overflow: visible; }
+
+  .week-grid { margin-right: -15px; border-radius: 8px 0 0 8px; min-height: 400px; -webkit-overflow-scrolling: touch; }
+  .week-day { min-width: 128px; }
+  .week-controls { width:100%; justify-content:space-between; }
+  .week-controls strong { min-width:0; flex:1; }
+  .agenda-card { min-height: 64px; }
+
+  .treatment-card { padding: 17px; }
+  .treatment-card footer { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .card-action { min-height:36px; border:1px solid #d7e7e6; border-radius:6px; }
+  .payment-summary { font-size: 11px; }
+  .payment-list-modal { min-height:100%; }
+  .payment-row { gap:10px; }
+
+  .odontogram-board { margin-right: -15px; border-radius: 9px 0 0 9px; }
+  .odontogram-layout { min-width: 0; }
+  .tooth-detail { padding: 18px; }
+  .legend { padding-bottom: 4px; }
+
+  .profile-hero { flex-wrap: wrap; gap: 12px; }
+  .profile-hero > div:nth-child(2) { min-width: 0; flex: 1; }
+  .profile-hero p { overflow-wrap:anywhere; }
+  .profile-grid.lower { margin-top: 15px; }
+  .profile-treatment { align-items:flex-start; flex-direction:column; gap:3px; }
+  .timeline-note { padding:14px 0; }
+
+  .audit-content, .team-content { padding-inline:15px; }
+  .audit-event { gap:11px; }
+  .audit-main span, .audit-main p { font-size:.84rem; }
+  .audit-meta { white-space:normal; }
+  .team-grid { gap:15px; }
+  .team-panel, .invite-panel, .invitations-panel { padding:18px; }
+  .invite-row code { max-width:100%; overflow-wrap:anywhere; }
+}
+
+@media (max-width: 390px) {
+  .header-actions { gap: 0; }
+  .topbar .new-appointment { padding: 10px; }
+  .metrics article { height: 118px; padding: 12px; }
+  .metrics strong { font-size: 19px; }
+  .filters { overflow-x:auto; padding-bottom:3px; }
+  .filter { white-space:nowrap; }
+  .treatment-card footer { grid-template-columns:1fr; }
+  .card-action { width:100%; }
+}
