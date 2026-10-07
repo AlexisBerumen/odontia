@@ -67,8 +67,9 @@ async function migrate() {
       duration_minutes integer not null default 30 check (duration_minutes between 10 and 240),
       appointment_type text not null, status text not null default 'pending'
         check (status in ('pending', 'confirmed', 'completed', 'cancelled')),
-      notes text, created_at timestamptz not null default now()
+      notes text, reminder_sent_at timestamptz, created_at timestamptz not null default now()
     );
+    alter table appointments add column if not exists reminder_sent_at timestamptz;
     create index if not exists appointments_owner_starts_idx on appointments (owner_id, starts_at);
     create table if not exists treatments (
       id uuid primary key, owner_id uuid not null references users(id) on delete cascade,
@@ -250,13 +251,13 @@ app.get('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const from = validDate(req.query.from) ? req.query.from : today;
   const to = validDate(req.query.to) ? req.query.to : from;
   if (to < from) return res.status(400).json({ error: 'El rango de fechas no es válido.' });
-  const { rows } = await pool.query(`select a.id, a.starts_at, a.duration_minutes, a.appointment_type, a.status, p.full_name as patient_name
+  const { rows } = await pool.query(`select a.id, a.patient_id, a.starts_at, a.duration_minutes, a.appointment_type, a.status, a.reminder_sent_at, p.full_name as patient_name, p.phone as patient_phone
     from appointments a join patients p on p.id = a.patient_id
     where a.owner_id = $1 and a.starts_at >= ($2::date at time zone 'America/Mexico_City')
       and a.starts_at < (($3::date + interval '1 day') at time zone 'America/Mexico_City')
     order by a.starts_at asc limit 250`, [req.user.sub, from, to]);
   const statuses = { pending: 'Pendiente', confirmed: 'Confirmada', completed: 'Atendida', cancelled: 'Cancelada' };
-  res.json({ appointments: rows.map(row => ({ id: row.id, startsAt: row.starts_at, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, durationMinutes: row.duration_minutes, status: statuses[row.status], statusKey: row.status, initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
+  res.json({ appointments: rows.map(row => ({ id: row.id, patientId: row.patient_id, phone: row.patient_phone, reminderSentAt: row.reminder_sent_at, startsAt: row.starts_at, time: new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Mexico_City' }).format(new Date(row.starts_at)), patient: row.patient_name, type: row.appointment_type, duration: `${row.duration_minutes} min`, durationMinutes: row.duration_minutes, status: statuses[row.status], statusKey: row.status, initials: row.patient_name.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() })) });
 }));
 
 app.get('/api/patients', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
@@ -507,6 +508,16 @@ app.patch('/api/appointments/:id', requireUser, asyncRoute(async (req, res) => {
     where id = $5 and owner_id = $6`, [startsAt.toISOString(), duration, appointmentType, status, req.params.id, req.user.sub]);
   if (!rowCount) return res.status(404).json({ error: 'Cita no encontrada.' });
   await recordAudit(req, 'appointment.updated', 'appointment', req.params.id, appointment.rows[0].full_name, { previousStatus: appointment.rows[0].status, newStatus: status, appointmentType });
+  res.json({ ok: true });
+}));
+
+app.patch('/api/appointments/:id/reminder', requireUser, asyncRoute(async (req, res) => {
+  const appointment = await pool.query(`select a.id, p.full_name, p.phone from appointments a join patients p on p.id = a.patient_id
+    where a.id = $1 and a.owner_id = $2`, [req.params.id, req.user.sub]);
+  if (!appointment.rowCount) return res.status(404).json({ error: 'Cita no encontrada.' });
+  if (!appointment.rows[0].phone) return res.status(400).json({ error: 'Este paciente no tiene teléfono registrado.' });
+  await pool.query('update appointments set reminder_sent_at = now() where id = $1 and owner_id = $2', [req.params.id, req.user.sub]);
+  await recordAudit(req, 'appointment.reminder_marked', 'appointment', req.params.id, appointment.rows[0].full_name);
   res.json({ ok: true });
 }));
 

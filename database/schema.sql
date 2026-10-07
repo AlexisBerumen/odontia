@@ -64,6 +64,7 @@ create table if not exists appointments (
   appointment_type text not null,
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'completed', 'cancelled')),
   notes text,
+  reminder_sent_at timestamptz,
   created_at timestamptz not null default now()
 );
 

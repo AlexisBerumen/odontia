@@ -11,6 +11,7 @@ import './payment-history.css';
 import './audit.css';
 import './team.css';
 import './mobile.css';
+import './reminders.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -92,7 +93,7 @@ const auditLabels = {
   'clinical_note.created':'Evolución clínica registrada', 'treatment.created':'Tratamiento creado', 'treatment.updated':'Tratamiento actualizado',
   'treatment.status_updated':'Estado de tratamiento actualizado', 'payment.created':'Abono registrado', 'payment.updated':'Abono corregido',
   'odontogram.created':'Pieza registrada en odontograma', 'odontogram.updated':'Pieza actualizada en odontograma',
-  'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada', 'team.invite_created':'Invitación de equipo creada',
+  'appointment.created':'Cita creada', 'appointment.updated':'Cita actualizada', 'appointment.reminder_marked':'Recordatorio de WhatsApp marcado como enviado', 'team.invite_created':'Invitación de equipo creada',
 };
 const statusLabels = {
   active:'Activo', completed:'Finalizado', pending:'Pendiente', confirmed:'Confirmada', cancelled:'Cancelada',
@@ -221,6 +222,14 @@ function odontogramPage() {
 async function loadOdontogram() { if (!odontogramPatientId) odontogramPatientId = patients[0]?.id || ''; if (!odontogramPatientId) return odontogramPage(); odontogramRecords = (await api(`/api/odontogram?patientId=${odontogramPatientId}`)).records; odontogramPage(); }
 function agendaModal() { return `<div class="modal-backdrop" id="agenda-modal"><form class="modal agenda-modal"><button type="button" class="modal-close" id="close-agenda-modal">×</button><p class="eyebrow">EDITAR CITA</p><h2>Detalles de la cita</h2><label>Paciente<input disabled name="patientName"/></label><div class="form-row"><label>Fecha<input required name="date" type="date"/></label><label>Hora<input required name="time" type="time"/></label></div><label>Tipo de cita<select name="appointmentType"><option>Limpieza dental</option><option>Valoración · primera cita</option><option>Revisión de tratamiento</option><option>Ajuste de ortodoncia</option></select></label><div class="form-row"><label>Duración<select name="durationMinutes"><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label><label>Estado<select name="status"><option value="pending">Pendiente</option><option value="confirmed">Confirmada</option><option value="completed">Atendida</option><option value="cancelled">Cancelada</option></select></label></div><p class="form-error" id="agenda-error"></p><button class="save-appointment">Guardar cambios</button></form></div>`; }
 function agendaCard(appointment) { return `<button class="agenda-card status-${esc(appointment.statusKey)}" data-edit-appointment="${esc(appointment.id)}"><b>${esc(appointment.time)}</b><span>${esc(appointment.patient)}</span><small>${esc(appointment.type)}</small></button>`; }
+function reminderMessage(appointment) {
+  const patientName = appointment.patient.split(/\s+/)[0];
+  const date = new Intl.DateTimeFormat('es-MX', { weekday:'long', day:'numeric', month:'long', timeZone:'America/Mexico_City' }).format(new Date(appointment.startsAt));
+  return `Hola, ${patientName}. Te recordamos tu cita en ${user.clinicName || 'Odontia'} el ${date} a las ${appointment.time}. ¿Nos confirmas tu asistencia? Gracias.`;
+}
+function reminderPanel() {
+  return `<section class="whatsapp-reminder" id="whatsapp-reminder" hidden><div class="whatsapp-reminder-heading"><span>${icon('message')}</span><div><p class="eyebrow">RECORDATORIO MANUAL</p><h3>Enviar por WhatsApp</h3></div></div><p class="whatsapp-help" id="whatsapp-help"></p><textarea id="whatsapp-message" rows="4" aria-label="Mensaje de recordatorio"></textarea><div class="whatsapp-actions"><button type="button" class="whatsapp-open" id="open-whatsapp">${icon('message')} Abrir WhatsApp</button><button type="button" class="whatsapp-mark" id="mark-whatsapp-sent">Marcar enviado</button></div><p class="reminder-status" id="reminder-status"></p></section>`;
+}
 function agendaPage() {
   const days = Array.from({ length:7 }, (_, index) => addDays(agendaStart, index));
   const monthText = new Intl.DateTimeFormat('es-MX', { month:'long', year:'numeric' }).format(agendaStart);
@@ -483,7 +492,56 @@ document.addEventListener('click', event => {
   form.appointmentType.value = editingAppointment.type;
   form.durationMinutes.value = String(editingAppointment.durationMinutes);
   form.status.value = editingAppointment.statusKey;
+  if (!form.querySelector('#whatsapp-reminder')) form.querySelector('#agenda-error').insertAdjacentHTML('beforebegin', reminderPanel());
+  const reminder = form.querySelector('#whatsapp-reminder');
+  const help = form.querySelector('#whatsapp-help');
+  const message = form.querySelector('#whatsapp-message');
+  const openButton = form.querySelector('#open-whatsapp');
+  const markButton = form.querySelector('#mark-whatsapp-sent');
+  const reminderStatus = form.querySelector('#reminder-status');
+  reminder.hidden = false;
+  message.value = reminderMessage(editingAppointment);
+  if (!editingAppointment.phone) {
+    help.textContent = 'Agrega un teléfono al expediente del paciente para enviar el recordatorio.';
+    openButton.disabled = true;
+    markButton.disabled = true;
+    reminderStatus.textContent = '';
+  } else {
+    help.textContent = `Se abrirá WhatsApp con el teléfono ${editingAppointment.phone}. Revisa el texto antes de enviarlo.`;
+    openButton.disabled = false;
+    markButton.disabled = false;
+    if (editingAppointment.reminderSentAt) {
+      markButton.textContent = 'Enviado';
+      reminderStatus.textContent = 'Este recordatorio ya fue marcado como enviado.';
+    } else {
+      markButton.textContent = 'Marcar enviado';
+      reminderStatus.textContent = '';
+    }
+  }
   modal.classList.add('visible');
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest('#open-whatsapp');
+  if (!button || !editingAppointment?.phone) return;
+  const rawPhone = String(editingAppointment.phone).replace(/\D/g, '').replace(/^00/, '');
+  const phone = rawPhone.length === 10 ? `52${rawPhone}` : rawPhone;
+  if (phone.length < 10) return toast('El teléfono del paciente no es válido.');
+  const message = document.querySelector('#whatsapp-message')?.value.trim();
+  if (!message) return toast('Escribe un mensaje antes de abrir WhatsApp.');
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
+});
+document.addEventListener('click', async event => {
+  const button = event.target.closest('#mark-whatsapp-sent');
+  if (!button || !editingAppointment?.phone || button.disabled) return;
+  button.disabled = true;
+  try {
+    await api(`/api/appointments/${editingAppointment.id}/reminder`, { method:'PATCH', body:JSON.stringify({}) });
+    toast('Recordatorio marcado como enviado');
+    await loadAgenda();
+  } catch (err) {
+    toast(err.message);
+    button.disabled = false;
+  }
 });
 function toast(message) { const element = document.createElement('div'); element.className = 'toast'; element.textContent = message; document.body.append(element); setTimeout(() => element.remove(), 2800); }
 async function boot() { if (!token) return authPage(); try { user = (await api('/api/auth/me')).user; await loadDashboard(); } catch { localStorage.removeItem('odontia-token'); token = null; authPage(); } }
