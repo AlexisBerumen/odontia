@@ -1,5 +1,11 @@
 /* Ajustes finales para teléfonos: el contenido aprovecha todo el ancho y conserva
    áreas táctiles cómodas sin alterar la interfaz de escritorio. */
+.auth-page {
+  margin-left: 0;
+  width: 100%;
+  min-height: 100dvh;
+}
+
 @media (max-width: 700px) {
   html { font-size: 17px; }
   body { max-width: 100%; overflow-x: hidden; font-size: 16px; }
@@ -34,6 +40,17 @@
   .modal input, .modal select, .modal textarea { font-size: 17px; padding:13px; }
   .form-row { gap: 0; }
   .toast { width: calc(100% - 30px); text-align:center; bottom:15px; }
+
+  .auth-page { min-height:100dvh; }
+  .auth-card { max-width:none; min-height:100dvh; margin:0; padding:34px 22px 42px; }
+  .auth-brand { margin-bottom:48px; font-size:31px; }
+  .auth-card h1 { font-size:34px; line-height:1.12; }
+  .auth-card #auth-copy > p:last-child { max-width:none; font-size:16px; line-height:1.55; margin-bottom:30px; }
+  .auth-card form { gap:17px; }
+  .auth-card label { gap:8px; font-size:14px; }
+  .auth-card input { min-height:52px; padding:13px 14px; font-size:17px; }
+  .auth-card .save-appointment { min-height:52px; font-size:16px; margin-top:8px; }
+  .auth-switch { font-size:14px; margin-top:24px; }
 
   .patient-row { grid-template-columns: 46px minmax(0, 1fr); gap: 12px; padding:18px; }
   .patient-row .avatar { width:46px; height:46px; font-size:14px; }
