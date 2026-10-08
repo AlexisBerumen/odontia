@@ -140,6 +140,10 @@ async function recordAudit(req, action, entityType, entityId, entityName, detail
 function changedFields(before, after, labels) {
   return Object.entries(labels).filter(([key]) => String(before[key] ?? '') !== String(after[key] ?? '')).map(([, label]) => label);
 }
+function normalizedPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
 
 async function requireUser(req, res, next) {
   const token = req.get('authorization')?.replace(/^Bearer\s+/i, '');
@@ -269,6 +273,16 @@ app.get('/api/patients', requireUser, requireRoles('owner', 'dentist', 'assistan
     id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, birthDate: row.birth_date, allergies: row.allergies, notes: row.notes,
     medicalHistory: row.medical_history, medications: row.medications, emergencyContact: row.emergency_contact, reasonForVisit: row.reason_for_visit, appointmentCount: row.appointment_count, lastAppointment: row.last_appointment,
   })) });
+}));
+
+app.get('/api/patients/search', requireUser, asyncRoute(async (req, res) => {
+  const query = String(req.query.q || '').trim();
+  if (query.length < 2) return res.json({ patients: [] });
+  const phoneQuery = String(query).replace(/\D/g, '');
+  const { rows } = await pool.query(`select id, full_name, phone from patients
+    where owner_id = $1 and (full_name ilike $2 or ($3 <> '' and regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g') like '%' || $3 || '%'))
+    order by full_name asc limit 8`, [req.user.sub, `%${query}%`, phoneQuery]);
+  res.json({ patients: rows.map(row => ({ id: row.id, fullName: row.full_name, phone: row.phone })) });
 }));
 
 app.post('/api/patients', requireUser, requireRoles('owner', 'dentist', 'assistant'), asyncRoute(async (req, res) => {
@@ -464,10 +478,12 @@ app.put('/api/odontogram/:toothNumber', requireUser, requireRoles('owner', 'dent
 
 app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const patientName = String(req.body.patientName || '').trim();
+  const patientPhone = String(req.body.patientPhone || '').trim();
+  const phoneDigits = normalizedPhone(patientPhone);
   const appointmentType = String(req.body.appointmentType || '').trim();
   const startsAt = new Date(req.body.startsAt);
   const duration = Number(req.body.durationMinutes || 30);
-  if (patientName.length < 2 || appointmentType.length < 2 || Number.isNaN(startsAt.valueOf()) || duration < 10 || duration > 240) return res.status(400).json({ error: 'Revisa los datos de la cita.' });
+  if (patientName.length < 2 || phoneDigits.length !== 10 || appointmentType.length < 2 || Number.isNaN(startsAt.valueOf()) || duration < 10 || duration > 240) return res.status(400).json({ error: 'Agrega nombre, un teléfono válido de 10 dígitos y revisa los datos de la cita.' });
   const conflict = await pool.query(`select 1 from appointments where owner_id = $1 and status <> 'cancelled'
     and starts_at < $2::timestamptz + ($3::int * interval '1 minute')
     and starts_at + (duration_minutes * interval '1 minute') > $2::timestamptz limit 1`, [req.user.sub, startsAt.toISOString(), duration]);
@@ -475,17 +491,27 @@ app.post('/api/appointments', requireUser, asyncRoute(async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const existing = await client.query('select id from patients where owner_id = $1 and lower(full_name) = lower($2) limit 1', [req.user.sub, patientName]);
-    const patientId = existing.rows[0]?.id || crypto.randomUUID();
-    if (!existing.rows[0]) {
-      await client.query('insert into patients (id, owner_id, full_name) values ($1, $2, $3)', [patientId, req.user.sub, patientName]);
+    const byPhone = await client.query(`select id, full_name, phone from patients where owner_id = $1
+      and right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = $2 limit 1`, [req.user.sub, phoneDigits]);
+    const byName = byPhone.rowCount ? byPhone : await client.query('select id, full_name, phone from patients where owner_id = $1 and lower(full_name) = lower($2) limit 1', [req.user.sub, patientName]);
+    const existing = byName.rows[0];
+    if (existing?.phone && normalizedPhone(existing.phone) !== phoneDigits) {
+      const error = new Error('Ya existe un paciente con ese nombre y un teléfono diferente. Búscalo y verifica sus datos antes de continuar.');
+      error.status = 409;
+      throw error;
+    }
+    const patientId = existing?.id || crypto.randomUUID();
+    if (!existing) {
+      await client.query('insert into patients (id, owner_id, full_name, phone) values ($1, $2, $3, $4)', [patientId, req.user.sub, patientName, patientPhone]);
       await recordAudit(req, 'patient.created_from_appointment', 'patient', patientId, patientName, {}, client);
+    } else if (!existing.phone) {
+      await client.query('update patients set phone = $1 where id = $2 and owner_id = $3', [patientPhone, patientId, req.user.sub]);
     }
     const appointmentId = crypto.randomUUID();
     await client.query('insert into appointments (id, owner_id, patient_id, starts_at, duration_minutes, appointment_type) values ($1, $2, $3, $4, $5, $6)', [appointmentId, req.user.sub, patientId, startsAt.toISOString(), duration, appointmentType]);
     await recordAudit(req, 'appointment.created', 'appointment', appointmentId, patientName, { appointmentType, startsAt: startsAt.toISOString(), duration }, client);
     await client.query('commit');
-  } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  } catch (error) { await client.query('rollback'); if (error.status) return res.status(error.status).json({ error: error.message }); throw error; } finally { client.release(); }
   res.status(201).json({ ok: true });
 }));
 

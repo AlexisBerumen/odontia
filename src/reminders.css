@@ -13,6 +13,12 @@
 .whatsapp-mark { border:1px solid #9dcfc0; background:#fff; color:#196e5b; }
 .whatsapp-open:disabled, .whatsapp-mark:disabled { cursor:not-allowed; opacity:.55; }
 .reminder-status { min-height:0; margin:9px 0 0; color:#28745e; font-size:11px; }
+.appointment-suggestions { margin:-8px 0 8px; overflow:hidden; border:1px solid #c9dfd8; border-radius:8px; background:#fff; box-shadow:0 7px 18px #174b4b14; }
+.appointment-suggestions button { width:100%; display:grid; gap:3px; border:0; border-bottom:1px solid #e5eeee; padding:10px 12px; background:#fff; color:#254347; text-align:left; }
+.appointment-suggestions button:last-child { border-bottom:0; }
+.appointment-suggestions button:hover { background:#f2fbf7; }
+.appointment-suggestions strong { font-size:12px; }
+.appointment-suggestions span { color:#678081; font-size:11px; }
 @media (max-width:700px) {
   .whatsapp-reminder { padding:17px; }
   .whatsapp-reminder h3 { font-size:17px; }
@@ -21,4 +27,8 @@
   .whatsapp-actions { display:grid; grid-template-columns:1fr; }
   .whatsapp-open, .whatsapp-mark { min-height:45px; font-size:14px; }
   .reminder-status { font-size:13px; }
+  .appointment-suggestions { margin-top:-9px; }
+  .appointment-suggestions button { min-height:52px; padding:11px 13px; }
+  .appointment-suggestions strong { font-size:15px; }
+  .appointment-suggestions span { font-size:13px; }
 }
