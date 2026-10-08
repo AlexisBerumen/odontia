@@ -6,6 +6,7 @@
 .auth-card.login-mode .auth-mode-tabs { margin-top:25px; }
 .auth-card.login-mode #auth-form { gap:16px; }
 .auth-card.login-mode .auth-brand { margin-bottom:68px; }
+.auth-card label[hidden] { display:none; }
 
 @media (max-width:700px) {
   .auth-mode-tabs { margin-bottom:26px; }
