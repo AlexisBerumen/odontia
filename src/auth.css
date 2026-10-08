@@ -1,0 +1,15 @@
+.auth-mode-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; margin:0 0 24px; border-radius:9px; background:#edf4f3; }
+.auth-mode-tabs button { min-height:40px; border:0; border-radius:6px; background:transparent; color:#668183; font:600 12px 'DM Sans', sans-serif; transition:background .18s, color .18s, box-shadow .18s; }
+.auth-mode-tabs button.active { color:#115f60; background:#fff; box-shadow:0 2px 7px #173d3d16; }
+.auth-login-hint { margin:16px 0 0; padding:11px 13px; border-radius:8px; background:#edf8f6; color:#39716d; font-size:12px; line-height:1.45; }
+.auth-card.login-mode #auth-copy { margin-bottom:2px; }
+.auth-card.login-mode .auth-mode-tabs { margin-top:25px; }
+.auth-card.login-mode #auth-form { gap:16px; }
+.auth-card.login-mode .auth-brand { margin-bottom:68px; }
+
+@media (max-width:700px) {
+  .auth-mode-tabs { margin-bottom:26px; }
+  .auth-mode-tabs button { min-height:46px; font-size:14px; }
+  .auth-login-hint { margin-top:20px; padding:13px 14px; font-size:14px; }
+  .auth-card.login-mode .auth-brand { margin-bottom:48px; }
+}

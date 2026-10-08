@@ -12,6 +12,7 @@ import './audit.css';
 import './team.css';
 import './mobile.css';
 import './reminders.css';
+import './auth.css';
 
 let token = localStorage.getItem('odontia-token');
 let user;
@@ -68,15 +69,27 @@ function authPage() {
   let register = true;
   const form = document.querySelector('#auth-form');
   document.querySelector('#clinic-label').insertAdjacentHTML('afterend', '<label id="invite-label">Código de invitación <em>(solo personal)</em><input name="inviteCode" autocomplete="off" placeholder="Ej. A1B2C3D4"/></label>');
+  form.insertAdjacentHTML('beforebegin', '<div class="auth-mode-tabs" role="tablist"><button type="button" data-auth-mode="register">Crear cuenta</button><button type="button" data-auth-mode="login">Iniciar sesión</button></div>');
+  form.insertAdjacentHTML('afterend', '<p class="auth-login-hint" id="auth-login-hint" hidden>Usa el correo y contraseña que registraste para entrar a tu clínica.</p>');
   const setMode = () => {
     document.querySelector('#name-label').hidden = !register; document.querySelector('#clinic-label').hidden = !register;
     document.querySelector('#invite-label').hidden = !register;
-    document.querySelector('#auth-submit').textContent = register ? 'Crear cuenta' : 'Iniciar sesión';
+    form.fullName.disabled = !register; form.clinicName.disabled = !register; form.inviteCode.disabled = !register;
+    document.querySelector('.auth-card').classList.toggle('login-mode', !register);
+    document.querySelector('#auth-copy .eyebrow').textContent = register ? 'COMIENZA CON ODONTIA' : 'BIENVENIDA DE NUEVO';
+    document.querySelector('#auth-copy h1').innerHTML = register ? 'Tu consultorio,<br/>siempre contigo.' : 'Todo listo para<br/>continuar.';
+    document.querySelector('#auth-copy > p:last-child').textContent = register ? 'Crea tu clínica y administra pacientes, citas y tratamientos desde cualquier dispositivo.' : 'Inicia sesión para volver a la agenda y a los expedientes de tu clínica.';
+    document.querySelector('#auth-submit').textContent = register ? 'Crear mi clínica' : 'Entrar a mi cuenta';
     document.querySelector('#switch-line').innerHTML = register ? '¿Ya tienes una cuenta? <button id="mode-toggle">Inicia sesión</button>' : '¿Aún no tienes cuenta? <button id="mode-toggle">Crear cuenta</button>';
     form.password.autocomplete = register ? 'new-password' : 'current-password';
+    form.password.placeholder = register ? 'Mínimo 8 caracteres' : 'Tu contraseña';
+    document.querySelector('#auth-login-hint').hidden = register;
+    document.querySelectorAll('[data-auth-mode]').forEach(button => button.classList.toggle('active', button.dataset.authMode === (register ? 'register' : 'login')));
+    document.querySelector('#form-error').textContent = '';
     document.querySelector('#mode-toggle').onclick = () => { register = !register; setMode(); };
   };
-  document.querySelector('#mode-toggle').onclick = () => { register = false; setMode(); };
+  document.querySelectorAll('[data-auth-mode]').forEach(button => button.onclick = () => { register = button.dataset.authMode === 'register'; setMode(); });
+  setMode();
   form.onsubmit = async event => {
     event.preventDefault(); const submit = document.querySelector('#auth-submit'); const error = document.querySelector('#form-error'); error.textContent = ''; submit.disabled = true;
     try { const payload = Object.fromEntries(new FormData(form)); const data = await api(register ? '/api/auth/register' : '/api/auth/login', { method:'POST', body:JSON.stringify(payload) }); token = data.token; localStorage.setItem('odontia-token', token); user = (await api('/api/auth/me')).user; await loadDashboard(); }
